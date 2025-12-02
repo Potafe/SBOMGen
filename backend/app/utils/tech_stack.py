@@ -21,7 +21,7 @@ def detect_tech_stack(repo_url: str, github_token: Optional[str] = None) -> List
         if len(parts) < 2:
             logger.warning(f"Invalid repo URL format: {repo_url}")
             return tech_stack
-        owner, repo_name = parts[-2], parts[-1]
+        owner, repo_name = parts[-2], parts[-1].rstrip('.git')
         logger.info(f"Extracted owner: {owner}, repo: {repo_name}")
         
         api_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents"

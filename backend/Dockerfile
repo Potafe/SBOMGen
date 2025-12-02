@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY docker/install_scanners.sh .
-RUN chmod +x install_scanners.sh && ./install_scanners.sh
+RUN chmod +x install_scanners.sh && sed -i 's/\r$//' install_scanners.sh && ./install_scanners.sh
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

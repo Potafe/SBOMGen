@@ -113,26 +113,49 @@ export function ScanAnalysis({ scanId }: ScanAnalysisProps) {
                     ) : (
                       <>
                         {matching.exact.map((pkg: any, idx: number) => (
-                          <div key={`exact-${idx}`} className="p-2 bg-green-50 border border-green-200 rounded">
+                          <div key={`exact-${idx}`} className="p-3 bg-green-50 border border-green-200 rounded">
                             <p className="font-medium text-sm">{pkg.name} {pkg.version}</p>
-                            <div className="flex gap-1 mt-1">
+                            {pkg.purl && <p className="text-xs text-gray-600 mt-1">PURL: {pkg.purl}</p>}
+                            {pkg.cpe && <p className="text-xs text-gray-600">CPE: {pkg.cpe}</p>}
+                            <div className="flex gap-1 mt-2">
                               <Badge variant="outline" className="text-xs">Exact Match</Badge>
                               {pkg.found_in.map((s: string) => (
                                 <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>
                               ))}
                             </div>
+                            <div className="grid grid-cols-4 gap-1 mt-2 text-xs">
+                              <div>Name: 100%</div>
+                              <div>Version: 100%</div>
+                              <div>PURL: 100%</div>
+                              <div>CPE: 100%</div>
+                            </div>
                           </div>
                         ))}
                         {matching.fuzzy.map((pkg: any, idx: number) => (
-                          <div key={`fuzzy-${idx}`} className="p-2 bg-yellow-50 border border-yellow-200 rounded">
+                          <div key={`fuzzy-${idx}`} className="p-3 bg-yellow-50 border border-yellow-200 rounded">
                             <p className="font-medium text-sm">{pkg.name} {pkg.version}</p>
-                            <p className="text-xs text-gray-600">Similar to: {pkg.similar_to.name} {pkg.similar_to.version}</p>
-                            <div className="flex gap-1 mt-1">
+                            {pkg.purl && <p className="text-xs text-gray-600 mt-1">PURL: {pkg.purl}</p>}
+                            {pkg.cpe && <p className="text-xs text-gray-600">CPE: {pkg.cpe}</p>}
+                            <div className="mt-2 p-2 bg-white/50 rounded border">
+                              <p className="text-xs font-medium mb-1">Similar to:</p>
+                              <p className="text-xs">{pkg.similar_to.name} {pkg.similar_to.version}</p>
+                              {pkg.similar_to.purl && <p className="text-xs text-gray-600">PURL: {pkg.similar_to.purl}</p>}
+                              {pkg.similar_to.cpe && <p className="text-xs text-gray-600">CPE: {pkg.similar_to.cpe}</p>}
+                            </div>
+                            <div className="flex gap-1 mt-2">
                               <Badge variant="outline" className="text-xs">{pkg.match_type}</Badge>
                               {pkg.found_in.map((s: string) => (
                                 <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>
                               ))}
                             </div>
+                            {pkg.match_scores && (
+                              <div className="grid grid-cols-4 gap-1 mt-2 text-xs">
+                                <div>Name: {Math.round(pkg.match_scores.name * 100)}%</div>
+                                <div>Version: {Math.round(pkg.match_scores.version * 100)}%</div>
+                                <div>PURL: {Math.round(pkg.match_scores.purl * 100)}%</div>
+                                <div>CPE: {Math.round(pkg.match_scores.cpe * 100)}%</div>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </>
@@ -149,7 +172,9 @@ export function ScanAnalysis({ scanId }: ScanAnalysisProps) {
                     ) : (
                       unique.map((pkg: any, idx: number) => (
                         <div key={idx} className="p-2 bg-blue-50 border border-blue-200 rounded">
-                          <p className="text-sm">{pkg.name} {pkg.version}</p>
+                          <p className="text-sm font-medium">{pkg.name} {pkg.version}</p>
+                          {pkg.purl && <p className="text-xs text-gray-600 mt-1">PURL: {pkg.purl}</p>}
+                          {pkg.cpe && <p className="text-xs text-gray-600">CPE: {pkg.cpe}</p>}
                         </div>
                       ))
                     )}

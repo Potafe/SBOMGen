@@ -99,7 +99,7 @@ class SBOMService:
                     temp_file_path = temp_file.name
                 
                 result = subprocess.run(
-                    ["syft", repo_path, "--output", f"cyclonedx-json={temp_file_path}"],
+                    ["/usr/local/bin/syft", repo_path, "--output", f"cyclonedx-json={temp_file_path}"],
                     capture_output=True, text=True, timeout=settings.SYFT_TIMEOUT
                 )
                 if result.returncode == 0:
@@ -209,73 +209,129 @@ class SBOMService:
         
         return None
     
-    def _extract_packages(self, sbom_data: Dict, scanner: ScannerType) -> List[Tuple[str, str]]:
-        """Extract (name, version) tuples from SBOM data."""
+    def _extract_packages(self, sbom_data: Dict, scanner: ScannerType) -> List[Dict[str, str]]:
+        """Extract package data with name, version, purl, and cpe from SBOM data."""
         packages = []
-        if scanner == ScannerType.TRIVY:
-            for component in sbom_data.get("components", []):
-                name = component.get("name", "").lower().strip()
-                version = component.get("version", "").lower().strip()
-                if name:
-                    packages.append((name, version))
-        elif scanner == ScannerType.SYFT:
-            for component in sbom_data.get("components", []):
-                name = component.get("name", "").lower().strip()
-                version = component.get("version", "").lower().strip()
-                if name:
-                    packages.append((name, version))
-        elif scanner == ScannerType.CDXGEN:
-            for component in sbom_data.get("components", []):
-                name = component.get("name", "").lower().strip()
-                version = component.get("version", "").lower().strip()
-                if name:
-                    packages.append((name, version))
+        for component in sbom_data.get("components", []):
+            name = component.get("name", "").lower().strip()
+            version = component.get("version", "").lower().strip()
+            purl = component.get("purl", "").lower().strip()
+            
+            cpe = ""
+            if "cpe" in component:
+                cpe = component["cpe"].lower().strip()
+            elif "externalReferences" in component:
+                for ref in component["externalReferences"]:
+                    if ref.get("type") == "cpe22Type" or ref.get("type") == "cpe23Type":
+                        cpe = ref.get("url", "").lower().strip()
+                        break
+            
+            if name:
+                packages.append({
+                    "name": name,
+                    "version": version,
+                    "purl": purl,
+                    "cpe": cpe
+                })
         return packages
     
-    def _find_common_packages(self, packages_list: List[List[Tuple[str, str]]]) -> Dict[str, List[Dict]]:
-        """Find common packages across scanners with exact and fuzzy matching."""
+    def _calculate_match_score(self, pkg1: Dict[str, str], pkg2: Dict[str, str]) -> Dict[str, float]:
+        """Calculate comprehensive match score including name, version, purl, and cpe."""
+        scores = {}
+        
+        scores["name"] = difflib.SequenceMatcher(None, pkg1["name"], pkg2["name"]).ratio()
+        
+        scores["version"] = difflib.SequenceMatcher(None, pkg1["version"], pkg2["version"]).ratio() if pkg1["version"] and pkg2["version"] else 0.0
+        
+        if pkg1["purl"] and pkg2["purl"]:
+            scores["purl"] = difflib.SequenceMatcher(None, pkg1["purl"], pkg2["purl"]).ratio()
+        else:
+            scores["purl"] = 0.0
+        
+        if pkg1["cpe"] and pkg2["cpe"]:
+            scores["cpe"] = difflib.SequenceMatcher(None, pkg1["cpe"], pkg2["cpe"]).ratio()
+        else:
+            scores["cpe"] = 0.0
+        
+        weights = {"name": 0.4, "version": 0.3, "purl": 0.2, "cpe": 0.1}
+        overall = sum(scores[field] * weights[field] for field in weights)
+        scores["overall"] = overall
+        
+        return scores
+    
+    def _find_common_packages(self, packages_list: List[List[Dict[str, str]]]) -> Dict[str, List[Dict]]:
+        """Find common packages across scanners with comprehensive matching."""
         common = defaultdict(list)
         scanner_names = ["trivy", "syft", "cdxgen"]
         
-        all_packages = set()
+        all_packages = []
         for i, packages in enumerate(packages_list):
             for pkg in packages:
-                all_packages.add(pkg)
+                pkg_key = (pkg["name"], pkg["version"], pkg["purl"], pkg["cpe"])
+                all_packages.append((pkg_key, pkg, i))
         
-        for pkg in all_packages:
-            found_in = []
-            for i, packages in enumerate(packages_list):
-                if pkg in packages:
-                    found_in.append(scanner_names[i])
-            if len(found_in) > 1:
+        package_groups = defaultdict(list)
+        for pkg_key, pkg, scanner_idx in all_packages:
+            package_groups[pkg_key].append((pkg, scanner_idx))
+        
+        for pkg_key, occurrences in package_groups.items():
+            if len(occurrences) > 1:
+                found_in = [scanner_names[scanner_idx] for _, scanner_idx in occurrences]
+                pkg = occurrences[0][0]  # Take first occurrence for details
                 common["exact"].append({
-                    "name": pkg[0],
-                    "version": pkg[1],
+                    "name": pkg["name"],
+                    "version": pkg["version"],
+                    "purl": pkg["purl"],
+                    "cpe": pkg["cpe"],
                     "found_in": found_in,
-                    "match_type": "exact"
+                    "match_type": "exact",
+                    "match_scores": {"name": 1.0, "version": 1.0, "purl": 1.0, "cpe": 1.0, "overall": 1.0}
                 })
         
-        # Fuzzy matches (similarity > 0.8)
+        exact_packages = set()
+        for item in common["exact"]:
+            exact_packages.add((item["name"], item["version"], item["purl"], item["cpe"]))
+        
         for i in range(len(packages_list)):
             for j in range(i+1, len(packages_list)):
                 for pkg1 in packages_list[i]:
                     for pkg2 in packages_list[j]:
-                        name_sim = difflib.SequenceMatcher(None, pkg1[0], pkg2[0]).ratio()
-                        version_sim = difflib.SequenceMatcher(None, pkg1[1], pkg2[1]).ratio()
-                        if name_sim > 0.8 and version_sim > 0.8:
-                            key = f"{pkg1[0]}-{pkg1[1]}"
-                            if not any(c["name"] == pkg1[0] and c["version"] == pkg1[1] for c in common["exact"]):
+                        pkg1_key = (pkg1["name"], pkg1["version"], pkg1["purl"], pkg1["cpe"])
+                        pkg2_key = (pkg2["name"], pkg2["version"], pkg2["purl"], pkg2["cpe"])
+                        
+                        if pkg1_key in exact_packages or pkg2_key in exact_packages:
+                            continue
+                        
+                        match_scores = self._calculate_match_score(pkg1, pkg2)
+                        
+                        # Consider it a fuzzy match if overall score > 0.7
+                        if match_scores["overall"] > 0.7:
+                            already_exists = any(
+                                (f["name"] == pkg1["name"] and f["version"] == pkg1["version"]) or
+                                (f["name"] == pkg2["name"] and f["version"] == pkg2["version"])
+                                for f in common["fuzzy"]
+                            )
+                            
+                            if not already_exists:
                                 common["fuzzy"].append({
-                                    "name": pkg1[0],
-                                    "version": pkg1[1],
-                                    "similar_to": {"name": pkg2[0], "version": pkg2[1]},
+                                    "name": pkg1["name"],
+                                    "version": pkg1["version"],
+                                    "purl": pkg1["purl"],
+                                    "cpe": pkg1["cpe"],
+                                    "similar_to": {
+                                        "name": pkg2["name"],
+                                        "version": pkg2["version"],
+                                        "purl": pkg2["purl"],
+                                        "cpe": pkg2["cpe"]
+                                    },
                                     "found_in": [scanner_names[i], scanner_names[j]],
-                                    "match_type": f"fuzzy-{int((name_sim + version_sim)/2 * 100)}%"
+                                    "match_type": f"fuzzy-{int(match_scores['overall'] * 100)}%",
+                                    "match_scores": match_scores
                                 })
         
         return dict(common)
     
-    def _find_unique_packages(self, packages_list: List[List[Tuple[str, str]]]) -> Dict[str, List[Dict]]:
+    def _find_unique_packages(self, packages_list: List[List[Dict[str, str]]]) -> Dict[str, List[Dict]]:
         """Find packages unique to each scanner."""
         unique = {}
         scanner_names = ["trivy", "syft", "cdxgen"]
@@ -283,16 +339,21 @@ class SBOMService:
         for i, packages in enumerate(packages_list):
             scanner_name = scanner_names[i]
             unique[scanner_name] = []
+            
             other_packages = set()
             for j, other in enumerate(packages_list):
                 if j != i:
-                    other_packages.update(other)
+                    for pkg in other:
+                        other_packages.add((pkg["name"], pkg["version"], pkg["purl"], pkg["cpe"]))
             
             for pkg in packages:
-                if pkg not in other_packages:
+                pkg_key = (pkg["name"], pkg["version"], pkg["purl"], pkg["cpe"])
+                if pkg_key not in other_packages:
                     unique[scanner_name].append({
-                        "name": pkg[0],
-                        "version": pkg[1]
+                        "name": pkg["name"],
+                        "version": pkg["version"],
+                        "purl": pkg["purl"],
+                        "cpe": pkg["cpe"]
                     })
         
         return unique

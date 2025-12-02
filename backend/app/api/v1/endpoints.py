@@ -9,11 +9,13 @@ from app.schemas.scan import (
     RerunRequest, ScanStatus
 )
 from app.services.sbom_service import SBOMService
+from app.services.sbom_merge import SBOMMerge
 from app.core.config import settings
 
 router = APIRouter()
 
 sbom_service = SBOMService()
+sbom_merge = SBOMMerge()
 
 @router.post("/upload-repository", response_model=ScanResponse)
 async def upload_repository(repo: RepositoryUpload, background_tasks: BackgroundTasks) -> ScanResponse:
@@ -55,7 +57,7 @@ async def rerun_scanner(request: RerunRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Rerun failed: {str(e)}")
 
 @router.get("/scan-status/{scan_id}")
-async def get_scan_status(scan_id: str) -> Dict[str, str]:
+async def get_scan_status(scan_id: str) -> Dict[str, str]:  
     """
     Check the status of a scan.
     """
@@ -156,3 +158,60 @@ async def get_scan_graph(scan_id: str, scanner_name: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get graph data: {str(e)}")
+
+@router.get("/merge-sbom/{scan_id}")
+async def get_merge_sbom(scan_id: str):
+    """
+    Get merged SBOM from all the scanners.
+    """
+    try:
+        results = await sbom_service.get_scan_results(scan_id)
+        if not results:
+            raise HTTPException(status_code=404, detail="Scan not found")
+        
+        sbom_data_list = []
+        scanner_names = []
+        
+        for scanner in [ScannerType.TRIVY, ScannerType.SYFT, ScannerType.CDXGEN]:
+            sbom_data = await sbom_service.get_scanner_sbom(scan_id, scanner)
+            sbom_data_list.append(sbom_data)
+            scanner_names.append(scanner.value)
+        
+        merged_result = await sbom_merge.merge_sboms(scan_id, sbom_data_list, scanner_names)
+        
+        if "error" in merged_result:
+            raise HTTPException(status_code=400, detail=merged_result["error"])
+        
+        return merged_result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to merge SBOMs: {str(e)}")
+
+@router.get("/download-merged-sbom/{scan_id}")
+async def download_merged_sbom(scan_id: str):
+    """
+    Download merged SBOM JSON file.
+    """
+    try:
+        merged_sbom = await get_merge_sbom(scan_id)
+        
+        results = await sbom_service.get_scan_results(scan_id)
+        repo_url = results.repo_url if results else "unknown"
+        repo_name = repo_url.rstrip('/').split('/')[-1]
+        
+        filename = f"merged-{repo_name}-sbom.json"
+        
+        return JSONResponse(
+            content=merged_sbom,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Type": "application/json"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to download merged SBOM: {str(e)}")

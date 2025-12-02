@@ -23,7 +23,8 @@ export function ScanResultsDisplay({ results }: ScanResultsDisplayProps) {
   };
 
   const downloadSBOM = (scanner: string) => {
-    const url = `${process.env.NEXT_PUBLIC_API_URL}/scan/download-sbom/${results.scan_id}/${scanner}`;
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+    const url = `${apiUrl}/scan/download-sbom/${results.scan_id}/${scanner}`;
     window.open(url, '_blank');
   };
 
