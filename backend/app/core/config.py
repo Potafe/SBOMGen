@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     DOCKER_REGISTRY: Optional[str] = None
     SCANNER_IMAGE_TAG: str = "latest"
 
-    REDIS_URL: str = "redis://localhost:6379"
+    # REDIS_URL: str = "redis://localhost:6379"
 
     TEMP_DIR: str = "./temp"
     RESULTS_DIR: str = "./results"

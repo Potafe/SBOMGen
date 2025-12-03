@@ -119,8 +119,8 @@ export function ScanAnalysis({ scanId }: ScanAnalysisProps) {
                             {pkg.cpe && <p className="text-xs text-gray-600">CPE: {pkg.cpe}</p>}
                             <div className="flex gap-1 mt-2">
                               <Badge variant="outline" className="text-xs">Exact Match</Badge>
-                              {pkg.found_in.map((s: string) => (
-                                <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>
+                              {pkg.found_in.map((s: string, badgeIndex: number) => (
+                                <Badge key={`${s}-${badgeIndex}`} variant="secondary" className="text-xs">{s}</Badge>
                               ))}
                             </div>
                             <div className="grid grid-cols-4 gap-1 mt-2 text-xs">
@@ -144,8 +144,8 @@ export function ScanAnalysis({ scanId }: ScanAnalysisProps) {
                             </div>
                             <div className="flex gap-1 mt-2">
                               <Badge variant="outline" className="text-xs">{pkg.match_type}</Badge>
-                              {pkg.found_in.map((s: string) => (
-                                <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>
+                              {pkg.found_in.map((s: string, badgeIndex: number) => (
+                                <Badge key={`${s}-${badgeIndex}`} variant="secondary" className="text-xs">{s}</Badge>
                               ))}
                             </div>
                             {pkg.match_scores && (
@@ -193,8 +193,8 @@ export function ScanAnalysis({ scanId }: ScanAnalysisProps) {
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-2">
-            {analysis.tech_stack.map((tech: string) => (
-              <Badge key={tech} variant="secondary">{tech}</Badge>
+            {analysis.tech_stack.map((tech: string, index: number) => (
+              <Badge key={`${tech}-${index}`} variant="secondary">{tech}</Badge>
             ))}
           </div>
         </CardContent>

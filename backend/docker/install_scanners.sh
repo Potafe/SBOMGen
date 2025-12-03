@@ -19,7 +19,7 @@ echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] \
 apt-get update
 apt-get install -y trivy || {
   echo "Failed to install Trivy from repo, trying direct download..."
-  wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.67.2_Linux-64bit.deb
+  wget https://github.com/aquasecurity/trivy/releases/download/v0.67.2/trivy_0.67.2_Linux-64bit.deb
   dpkg -i trivy_0.67.2_Linux-64bit.deb
   rm trivy_0.67.2_Linux-64bit.deb
 }
