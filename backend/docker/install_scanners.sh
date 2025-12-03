@@ -40,6 +40,7 @@ fi
 
 # Install CycloneDX CLI for merging SBOMs
 echo "Installing CycloneDX CLI..."
-npm install -g @cyclonedx/cyclonedx-cli
+wget https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.29.1/cyclonedx-linux-x64 -O /usr/local/bin/cyclonedx
+chmod +x /usr/local/bin/cyclonedx
 
 echo "All scanners installed."
