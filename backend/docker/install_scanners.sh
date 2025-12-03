@@ -30,13 +30,8 @@ curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -
 
 # Install CDXGen
 echo "Installing CDXGen..."
-npm install -g @cyclonedx/cdxgen
-
-# Create symlink for cdxgen if it doesn't exist in /usr/local/bin
-if [ ! -f /usr/local/bin/cdxgen ]; then
-  ln -sf /usr/local/lib/node_modules/@cyclonedx/cdxgen/bin/cdxgen.js /usr/local/bin/cdxgen
-  chmod +x /usr/local/bin/cdxgen
-fi
+wget https://github.com/CycloneDX/cdxgen/releases/download/v12.0.0/cdxgen-linux-amd64 -O /usr/local/bin/cdxgen
+chmod +x /usr/local/bin/cdxgen
 
 # Install CycloneDX CLI for merging SBOMs
 echo "Installing CycloneDX CLI..."

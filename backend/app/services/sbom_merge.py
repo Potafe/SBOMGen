@@ -142,108 +142,11 @@ class SBOMMerge:
                 except:
                     pass
     
-    async def _custom_merge(self, scan_id: str, 
-                           valid_sboms: List[tuple]) -> Dict[str, Any]:
-        """
-        Custom SBOM merge logic as fallback.
-        """
-        merged_components = {}
-        merged_dependencies = []
-        scanner_sources = []
-        
-        base_sbom = valid_sboms[0][0]
-        
-        merged_sbom = {
-            "bomFormat": "CycloneDX",
-            "specVersion": "1.5",
-            "serialNumber": f"urn:uuid:{scan_id}",
-            "version": 1,
-            "metadata": {
-                "timestamp": datetime.now().isoformat(),
-                "tools": [
-                    {
-                        "vendor": "SBOMGen",
-                        "name": "custom-sbom-merger",
-                        "version": "1.0.0"
-                    }
-                ],
-                "component": base_sbom.get('metadata', {}).get('component', {})
-            },
-            "components": [],
-            "dependencies": []
-        }
-        
-        for sbom_data, scanner_name in valid_sboms:
-            scanner_sources.append(scanner_name)
-            
-            for component in sbom_data.get('components', []):
-                purl = component.get('purl', '')
-                name = component.get('name', '')
-                version = component.get('version', '')
-                
-                if purl:
-                    key = purl
-                else:
-                    key = f"{name}@{version}"
-                
-                if key in merged_components:
-                    existing = merged_components[key]
-                    
-                    existing_licenses = set(
-                        lic.get('license', {}).get('id', '') 
-                        for lic in existing.get('licenses', [])
-                    )
-                    new_licenses = set(
-                        lic.get('license', {}).get('id', '') 
-                        for lic in component.get('licenses', [])
-                    )
-                    all_licenses = existing_licenses.union(new_licenses)
-                    if all_licenses:
-                        existing['licenses'] = [
-                            {'license': {'id': lic_id}} 
-                            for lic_id in all_licenses if lic_id
-                        ]
-                    
-                    if 'properties' not in existing:
-                        existing['properties'] = []
-                    
-                    existing['properties'].append({
-                        'name': 'sbom:source_scanner',
-                        'value': scanner_name
-                    })
-                    
-                else:
-                    new_component = component.copy()
-                    if 'properties' not in new_component:
-                        new_component['properties'] = []
-                    
-                    new_component['properties'].append({
-                        'name': 'sbom:source_scanner',
-                        'value': scanner_name
-                    })
-                    
-                    merged_components[key] = new_component
-            
-            for dep in sbom_data.get('dependencies', []):
-                if dep not in merged_dependencies:
-                    merged_dependencies.append(dep)
-        
-        merged_sbom['components'] = list(merged_components.values())
-        merged_sbom['dependencies'] = merged_dependencies
-        
-        merged_sbom['metadata']['properties'] = [
-            {
-                'name': 'sbom:merge_source_scanners',
-                'value': ','.join(scanner_sources)
-            },
-            {
-                'name': 'sbom:total_components',
-                'value': str(len(merged_sbom['components']))
-            },
-            {
-                'name': 'sbom:scan_id',
-                'value': scan_id
-            }
-        ]
-        
-        return merged_sbom
+
+    #TODO: implement this function, in case cyclondex fails
+    
+    # async def _custom_merge(self, scan_id: str, valid_sboms: List[tuple]) -> Dict[str, Any]:
+    #     """
+    #     Custom SBOM merge logic as fallback.
+    #     """
+    #     pass
