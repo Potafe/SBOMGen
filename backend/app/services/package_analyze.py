@@ -60,44 +60,60 @@ class PackageAnalyze:
         common = defaultdict(list)
         scanner_names = ["trivy", "syft", "cdxgen"]
         
-        all_packages = []
+        # Group packages by unique key and track duplicates per scanner
+        package_groups = defaultdict(lambda: defaultdict(int))  # pkg_key -> {scanner_idx: count}
+        package_details = {}  # pkg_key -> package details
+        
         for i, packages in enumerate(packages_list):
             for pkg in packages:
                 pkg_key = (pkg["name"], pkg["version"], pkg["purl"], pkg["cpe"])
-                all_packages.append((pkg_key, pkg, i))
+                package_groups[pkg_key][i] += 1
+                if pkg_key not in package_details:
+                    package_details[pkg_key] = pkg
         
-        package_groups = defaultdict(list)
-        for pkg_key, pkg, scanner_idx in all_packages:
-            package_groups[pkg_key].append((pkg, scanner_idx))
-        
-        for pkg_key, occurrences in package_groups.items():
-            if len(occurrences) > 1:
-                found_in = [scanner_names[scanner_idx] for _, scanner_idx in occurrences]
-                pkg = occurrences[0][0]  # Take first occurrence for details
+        # Find packages that appear in multiple scanners
+        for pkg_key, scanner_counts in package_groups.items():
+            if len(scanner_counts) > 1:  # Found in multiple scanners
+                pkg = package_details[pkg_key]
+                found_in_scanners = list(scanner_counts.keys())
+                duplicate_counts = {scanner_names[i]: count for i, count in scanner_counts.items()}
+                
                 common["exact"].append({
                     "name": pkg["name"],
                     "version": pkg["version"],
                     "purl": pkg["purl"],
                     "cpe": pkg["cpe"],
-                    "found_in": found_in,
+                    "found_in": [scanner_names[i] for i in found_in_scanners],
+                    "duplicate_counts": duplicate_counts,
+                    "has_duplicates": any(count > 1 for count in scanner_counts.values()),
                     "match_type": "exact",
                     "match_scores": {"name": 1.0, "version": 1.0, "purl": 1.0, "cpe": 1.0, "overall": 1.0}
                 })
         
+        # Get exact packages to avoid duplicating them in fuzzy matches
         exact_packages = set()
         for item in common["exact"]:
             exact_packages.add((item["name"], item["version"], item["purl"], item["cpe"]))
         
+        # Find fuzzy matches between different scanners
         for i in range(len(packages_list)):
             for j in range(i+1, len(packages_list)):
-                for pkg1 in packages_list[i]:
-                    for pkg2 in packages_list[j]:
-                        pkg1_key = (pkg1["name"], pkg1["version"], pkg1["purl"], pkg1["cpe"])
-                        pkg2_key = (pkg2["name"], pkg2["version"], pkg2["purl"], pkg2["cpe"])
-                        
-                        if pkg1_key in exact_packages or pkg2_key in exact_packages:
-                            continue
-                        
+                # Get unique packages from each scanner for fuzzy matching
+                unique_i = {}
+                unique_j = {}
+                
+                for pkg in packages_list[i]:
+                    pkg_key = (pkg["name"], pkg["version"], pkg["purl"], pkg["cpe"])
+                    if pkg_key not in exact_packages:
+                        unique_i[pkg_key] = pkg
+                
+                for pkg in packages_list[j]:
+                    pkg_key = (pkg["name"], pkg["version"], pkg["purl"], pkg["cpe"])
+                    if pkg_key not in exact_packages:
+                        unique_j[pkg_key] = pkg
+                
+                for pkg1_key, pkg1 in unique_i.items():
+                    for pkg2_key, pkg2 in unique_j.items():
                         match_scores = self._calculate_match_score(pkg1, pkg2)
                         
                         # Consider it a fuzzy match if overall score > 0.7
@@ -109,6 +125,18 @@ class PackageAnalyze:
                             )
                             
                             if not already_exists:
+                                # Check for duplicates in the original scanners
+                                pkg1_duplicates = sum(1 for p in packages_list[i] if 
+                                    (p["name"], p["version"], p["purl"], p["cpe"]) == pkg1_key)
+                                pkg2_duplicates = sum(1 for p in packages_list[j] if 
+                                    (p["name"], p["version"], p["purl"], p["cpe"]) == pkg2_key)
+                                
+                                duplicate_counts = {}
+                                if pkg1_duplicates > 0:
+                                    duplicate_counts[scanner_names[i]] = pkg1_duplicates
+                                if pkg2_duplicates > 0:
+                                    duplicate_counts[scanner_names[j]] = pkg2_duplicates
+                                
                                 common["fuzzy"].append({
                                     "name": pkg1["name"],
                                     "version": pkg1["version"],
@@ -121,6 +149,8 @@ class PackageAnalyze:
                                         "cpe": pkg2["cpe"]
                                     },
                                     "found_in": [scanner_names[i], scanner_names[j]],
+                                    "duplicate_counts": duplicate_counts,
+                                    "has_duplicates": any(count > 1 for count in duplicate_counts.values()),
                                     "match_type": f"fuzzy-{int(match_scores['overall'] * 100)}%",
                                     "match_scores": match_scores
                                 })
