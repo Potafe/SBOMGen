@@ -13,6 +13,9 @@ class ScannerType(str, Enum):
     TRIVY = "trivy"
     SYFT = "syft"
     CDXGEN = "cdxgen"
+    BLACKDUCK = "bd"
+    GHAS = "ghas"
+    UPLOADED = "uploaded"
 
 class RepositoryUpload(BaseModel):
     repo_url: HttpUrl
@@ -40,8 +43,29 @@ class ScanResults(BaseModel):
     syft_sbom: Optional[SBOMResult] = None
     cdxgen_sbom: Optional[SBOMResult] = None
     tech_stack: Optional[List[str]] = None
+    uploaded_sbom: Optional[SBOMResult] = None
 
 class RerunRequest(BaseModel):
     scan_id: str
     scanner: ScannerType
     commands: Optional[List[str]] = None
+
+class SBOMFormat(str, Enum):
+    SPDX = "spdx"
+    CYCLONEDX = "cyclonedx"
+
+class SBOMUploadResponse(BaseModel):
+    scan_id: str
+    status: str
+    message: str
+    format: str
+    component_count: int
+
+class UploadedScanResults(BaseModel):
+    scan_id: str
+    status: ScanStatus
+    filename: str
+    original_format: str
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+    uploaded_sbom: Optional[SBOMResult] = None

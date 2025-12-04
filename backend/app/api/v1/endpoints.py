@@ -1,12 +1,17 @@
 import os
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import (
+    APIRouter, HTTPException, 
+    BackgroundTasks, File, 
+    UploadFile, Form 
+)
 from fastapi.responses import JSONResponse
 from typing import Dict, Any
 from app.schemas.scan import (
     RepositoryUpload, ScanResponse, 
     ScannerType, ScanResults, 
-    RerunRequest, ScanStatus
+    RerunRequest, ScanStatus, 
+    SBOMFormat, SBOMUploadResponse
 )
 from app.services.sbom_service import SBOMService
 from app.services.sbom_merge import SBOMMerge
@@ -42,19 +47,21 @@ async def get_sbom_results(scan_id: str) -> ScanResults:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve results: {str(e)}")
 
-@router.post("/rerun-scanner", response_model=Dict[str, Any])
-async def rerun_scanner(request: RerunRequest) -> Dict[str, Any]:
-    """
-    Rerun a specific scanner with additional commands.
-    """
-    try:
-        success = await sbom_service.rerun_scanner(request.scan_id, request.scanner, request.commands)
-        if success:
-            return {"status": "success", "message": f"{request.scanner} rerun completed"}
-        else:
-            raise HTTPException(status_code=400, detail="Rerun failed")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Rerun failed: {str(e)}")
+#TODO: implement this (will do this later, not priority now):
+
+# @router.post("/rerun-scanner", response_model=Dict[str, Any])
+# async def rerun_scanner(request: RerunRequest) -> Dict[str, Any]:
+#     """
+#     Rerun a specific scanner with additional commands.
+#     """
+#     try:
+#         success = await sbom_service.rerun_scanner(request.scan_id, request.scanner, request.commands)
+#         if success:
+#             return {"status": "success", "message": f"{request.scanner} rerun completed"}
+#         else:
+#             raise HTTPException(status_code=400, detail="Rerun failed")
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Rerun failed: {str(e)}")
 
 @router.get("/scan-status/{scan_id}")
 async def get_scan_status(scan_id: str) -> Dict[str, str]:  
@@ -92,7 +99,7 @@ async def get_scan_logs(scan_id: str) -> Dict[str, Any]:
 @router.get("/download-sbom/{scan_id}/{scanner_name}")
 async def download_sbom(scan_id: str, scanner_name: str):
     """
-    Download SBOM JSON file for scanners.
+    Download SBOM JSON file for scanners (including uploaded SBOMs).
     """
     try:
         try:
@@ -100,18 +107,29 @@ async def download_sbom(scan_id: str, scanner_name: str):
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid scanner name")
         
-        results = await sbom_service.get_scan_results(scan_id)
-        if not results:
-            raise HTTPException(status_code=404, detail="Scan not found")
-        
-        sbom_data = await sbom_service.get_scanner_sbom(scan_id, scanner)
-        if not sbom_data:
-            raise HTTPException(status_code=404, detail="SBOM not found for this scanner")
-        
-        repo_url = results.repo_url
-        repo_name = repo_url.rstrip('/').split('/')[-1]
-        
-        filename = f"{scanner_name}-{repo_name}-sbom.json"
+        # Check if it's an uploaded SBOM
+        if scanner == ScannerType.UPLOADED:
+            uploaded_results = await sbom_service.get_uploaded_scan_results(scan_id)
+            if not uploaded_results:
+                raise HTTPException(status_code=404, detail="Uploaded SBOM scan not found")
+            
+            sbom_data = await sbom_service.get_scanner_sbom(scan_id, scanner)
+            if not sbom_data:
+                raise HTTPException(status_code=404, detail="SBOM not found")
+            
+            filename = f"uploaded-{uploaded_results.filename}"
+        else:
+            results = await sbom_service.get_scan_results(scan_id)
+            if not results:
+                raise HTTPException(status_code=404, detail="Scan not found")
+            
+            sbom_data = await sbom_service.get_scanner_sbom(scan_id, scanner)
+            if not sbom_data:
+                raise HTTPException(status_code=404, detail="SBOM not found for this scanner")
+            
+            repo_url = results.repo_url
+            repo_name = repo_url.rstrip('/').split('/')[-1]
+            filename = f"{scanner_name}-{repo_name}-sbom.json"
         
         return JSONResponse(
             content=sbom_data,
@@ -124,7 +142,7 @@ async def download_sbom(scan_id: str, scanner_name: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to download SBOM: {str(e)}")
-
+    
 @router.get("/scan-analysis/{scan_id}")
 async def get_scan_analysis(scan_id: str):
     """
@@ -215,3 +233,56 @@ async def download_merged_sbom(scan_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to download merged SBOM: {str(e)}")
+    
+@router.post("/upload-sbom", response_model=SBOMUploadResponse)
+async def upload_sbom_file(file: UploadFile = File(...), format: str = Form(...)) -> SBOMUploadResponse:
+    """
+    Upload an SBOM file (SPDX or CycloneDX format) for analysis.
+    """
+    try:
+        if format.lower() not in ["spdx", "cyclonedx"]:
+            raise HTTPException(status_code=400, detail="Format must be 'spdx' or 'cyclonedx'")
+        
+        if not file.filename.endswith(('.json', '.spdx.json', '.cdx.json')):
+            raise HTTPException(status_code=400, detail="File must be a JSON file")
+        
+        file_content = await file.read()
+        if len(file_content) == 0:
+            raise HTTPException(status_code=400, detail="File is empty")
+        
+        scan_id = await sbom_service.process_uploaded_sbom(
+            filename=file.filename,
+            file_content=file_content,
+            sbom_format=format
+        )
+        
+        uploaded_results = await sbom_service.get_uploaded_scan_results(scan_id)
+        component_count = 0
+        if uploaded_results and uploaded_results.uploaded_sbom:
+            component_count = uploaded_results.uploaded_sbom.component_count
+        
+        return SBOMUploadResponse(
+            scan_id=scan_id,
+            status="completed",
+            message=f"SBOM file '{file.filename}' processed successfully",
+            format=format,
+            component_count=component_count
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process SBOM file: {str(e)}")
+    
+@router.get("/uploaded-sbom-results/{scan_id}")
+async def get_uploaded_sbom_results(scan_id: str):
+    """
+    Fetch results for an uploaded SBOM file.
+    """
+    try:
+        results = await sbom_service.get_uploaded_scan_results(scan_id)
+        if not results:
+            raise HTTPException(status_code=404, detail="Uploaded SBOM scan not found")
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve uploaded SBOM results: {str(e)}")

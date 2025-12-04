@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SBOM Generator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f9fafb;
+            margin: 0;
+            padding: 3rem 1rem;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 64rem;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .header h1 {
+            color: #111827;
+            font-size: 1.875rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        .header p {
+            color: #6b7280;
+            margin-bottom: 1rem;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .card-header h2 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin: 0 0 0.5rem 0;
+            color: #111827;
+        }
+        .card-header p {
+            color: #6b7280;
+            font-size: 0.875rem;
+            margin: 0;
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        .form-group label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+            color: #374151;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            box-sizing: border-box;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        .form-group small {
+            color: #6b7280;
+            font-size: 0.75rem;
+            margin-top: 0.25rem;
+            display: block;
+        }
+        .error {
+            color: #dc2626;
+            font-size: 0.875rem;
+            margin-top: 0.25rem;
+        }
+        .btn {
+            background-color: #3b82f6;
+            color: white;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            font-size: 0.875rem;
+            width: 100%;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+        .btn:hover {
+            background-color: #2563eb;
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-outline {
+            background-color: transparent;
+            color: #374151;
+            border: 1px solid #d1d5db;
+        }
+        .btn-outline:hover {
+            background-color: #f9fafb;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .status-completed { background-color: #dcfce7; color: #166534; }
+        .status-failed { background-color: #fee2e2; color: #dc2626; }
+        .status-in-progress { background-color: #fef3c7; color: #d97706; }
+        .status-pending { background-color: #e5e7eb; color: #374151; }
+        .scanner-result {
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .scanner-result h3 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1rem;
+            text-transform: capitalize;
+        }
+        .scanner-stats {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.875rem;
+            color: #6b7280;
+            flex-wrap: wrap;
+        }
+        .hidden { display: none; }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        @media (max-width: 768px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+        .btn-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .btn-small {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            width: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>SBOM Generator</h1>
+            <p>Upload a GitHub repository to generate Software Bill of Materials</p>
+            <div style="margin-top: 1rem;">
+                <a href="/static/upload-sbom.html" class="btn btn-outline" style="width: auto; margin-right: 0.5rem;">
+                    📄 Submit SBOM File to Visualize
+                </a>
+                <a href="/docs" class="btn btn-outline" style="width: auto;">
+                    📚 API Documentation
+                </a>
+            </div>
+        </div>
+
+        <!-- Upload Repository Card -->
+        <div class="card">
+            <div class="card-header">
+                <h2>Upload Repository</h2>
+                <p>Enter the URL of a GitHub repository to start scanning</p>
+            </div>
+            <form id="uploadForm">
+                <div class="form-group">
+                    <label for="repo_url">GitHub Repository URL</label>
+                    <input type="url" id="repo_url" placeholder="https://github.com/username/repo" required>
+                    <div class="error" id="repo_url_error"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="github_token">GitHub Token (Optional - for private repos)</label>
+                    <input type="password" id="github_token" placeholder="ghp_...">
+                    <small>Required for private repositories. Create a PAT with repo access.</small>
+                </div>
+                
+                <div class="error" id="upload_error"></div>
+                
+                <button type="submit" class="btn" id="uploadBtn">Upload Repository</button>
+            </form>
+            
+            <button class="btn btn-outline hidden" id="newUploadBtn" style="margin-top: 1rem;">Upload New Repository</button>
+        </div>
+
+        <!-- Scan Status Card -->
+        <div class="card hidden" id="statusCard">
+            <div class="card-header">
+                <h2>Scan Status</h2>
+            </div>
+            <div id="statusContent"></div>
+        </div>
+
+        <!-- Analysis Button Card -->
+        <div class="card hidden" id="analysisCard">
+            <div class="card-header">
+                <h2>Analysis</h2>
+                <p>Compare packages across scanners to determine accuracy</p>
+            </div>
+            <div class="btn-group">
+                <button class="btn" id="viewAnalysisBtn">View Detailed Analysis</button>
+                <button class="btn btn-outline" id="viewMergedBtn">View Merged SBOM</button>
+            </div>
+        </div>
+
+        <!-- Scan Results Card -->
+        <div class="card hidden" id="resultsCard">
+            <div class="card-header">
+                <h2>Scan Results</h2>
+                <div id="resultsHeader"></div>
+            </div>
+            <div id="resultsContent"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = '/api/v1';
+        
+        // State management
+        let currentScanResponse = null;
+        let currentScanResults = null;
+        let pollingInterval = null;
+
+        // DOM elements
+        const uploadForm = document.getElementById('uploadForm');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const newUploadBtn = document.getElementById('newUploadBtn');
+        const statusCard = document.getElementById('statusCard');
+        const analysisCard = document.getElementById('analysisCard');
+        const resultsCard = document.getElementById('resultsCard');
+        const viewAnalysisBtn = document.getElementById('viewAnalysisBtn');
+        const viewMergedBtn = document.getElementById('viewMergedBtn');
+
+        // Load persisted data on page load
+        window.addEventListener('load', loadPersistedData);
+
+        function loadPersistedData() {
+            const savedScanResponse = localStorage.getItem('scanResponse');
+            const savedScanResults = localStorage.getItem('scanResults');
+            
+            if (savedScanResponse) {
+                try {
+                    currentScanResponse = JSON.parse(savedScanResponse);
+                    updateScanStatus();
+                    uploadForm.style.display = 'none';
+                    newUploadBtn.classList.remove('hidden');
+                } catch (error) {
+                    console.warn('Failed to parse saved scan response:', error);
+                    localStorage.removeItem('scanResponse');
+                }
+            }
+            
+            if (savedScanResults) {
+                try {
+                    currentScanResults = JSON.parse(savedScanResults);
+                    displayScanResults();
+                } catch (error) {
+                    console.warn('Failed to parse saved scan results:', error);
+                    localStorage.removeItem('scanResults');
+                }
+            }
+
+            // If we have a scan response but no results, start polling
+            if (currentScanResponse && !currentScanResults) {
+                startPolling();
+            }
+        }
+
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const repoUrl = document.getElementById('repo_url').value;
+            const githubToken = document.getElementById('github_token').value;
+            
+            // Clear previous errors
+            clearErrors();
+            
+            if (!isValidUrl(repoUrl)) {
+                showError('repo_url_error', 'Enter a valid GitHub repository URL');
+                return;
+            }
+            
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Uploading...';
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/scan/upload-repository`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        repo_url: repoUrl,
+                        github_token: githubToken || undefined
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Upload failed');
+                }
+                
+                currentScanResponse = data;
+                currentScanResults = null; // Reset results
+                localStorage.setItem('scanResponse', JSON.stringify(data));
+                localStorage.removeItem('scanResults'); // Clear old results
+                
+                // Reset form and show status
+                uploadForm.style.display = 'none';
+                newUploadBtn.classList.remove('hidden');
+                updateScanStatus();
+                startPolling();
+                
+            } catch (error) {
+                showError('upload_error', error.message);
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Upload Repository';
+            }
+        });
+
+        newUploadBtn.addEventListener('click', () => {
+            currentScanResponse = null;
+            currentScanResults = null;
+            localStorage.removeItem('scanResponse');
+            localStorage.removeItem('scanResults');
+            
+            uploadForm.style.display = 'block';
+            newUploadBtn.classList.add('hidden');
+            statusCard.classList.add('hidden');
+            analysisCard.classList.add('hidden');
+            resultsCard.classList.add('hidden');
+            
+            uploadForm.reset();
+            clearErrors();
+            
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+        });
+
+        viewAnalysisBtn.addEventListener('click', () => {
+            if (currentScanResults) {
+                window.location.href = `/static/analysis.html?scanId=${currentScanResults.scan_id}`;
+            }
+        });
+
+        viewMergedBtn.addEventListener('click', () => {
+            if (currentScanResults) {
+                window.location.href = `/static/merged-sbom.html?scanId=${currentScanResults.scan_id}`;
+            }
+        });
+
+        function updateScanStatus() {
+            if (!currentScanResponse) return;
+            
+            statusCard.classList.remove('hidden');
+            const status = currentScanResults ? currentScanResults.status : 'In Progress...';
+            document.getElementById('statusContent').innerHTML = `
+                <p style="color: #059669; margin-bottom: 0.5rem;">${currentScanResponse.message}</p>
+                <p style="color: #6b7280; font-size: 0.875rem; margin-bottom: 0.25rem;">Scan ID: ${currentScanResponse.scan_id}</p>
+                <p style="color: #6b7280; font-size: 0.875rem;">Status: ${status}</p>
+            `;
+        }
+
+        function startPolling() {
+            if (!currentScanResponse || pollingInterval) return;
+            
+            pollingInterval = setInterval(async () => {
+                try {
+                    const statusResponse = await fetch(`${API_BASE_URL}/scan/scan-status/${currentScanResponse.scan_id}`);
+                    const statusData = await statusResponse.json();
+                    
+                    if (statusData.status === 'completed') {
+                        const resultsResponse = await fetch(`${API_BASE_URL}/scan/sbom-results/${currentScanResponse.scan_id}`);
+                        const results = await resultsResponse.json();
+                        
+                        currentScanResults = results;
+                        localStorage.setItem('scanResults', JSON.stringify(results));
+                        
+                        displayScanResults();
+                        updateScanStatus();
+                        
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                    } else if (statusData.status === 'failed') {
+                        updateScanStatus();
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                    }
+                } catch (error) {
+                    console.error('Error polling status:', error);
+                }
+            }, 5000);
+        }
+
+        function displayScanResults() {
+            if (!currentScanResults) return;
+            
+            analysisCard.classList.remove('hidden');
+            resultsCard.classList.remove('hidden');
+            
+            // Update results header
+            document.getElementById('resultsHeader').innerHTML = `
+                <p style="color: #6b7280; font-size: 0.875rem;">Repository: ${currentScanResults.repo_url}</p>
+            `;
+            
+            // Display scanner results
+            const resultsContent = document.getElementById('resultsContent');
+            resultsContent.innerHTML = `
+                <div class="grid" style="margin-bottom: 1rem;">
+                    <div>
+                        <p style="font-weight: 500; color: #6b7280; font-size: 0.875rem;">Status</p>
+                        <span class="status-badge status-${currentScanResults.status}">${currentScanResults.status}</span>
+                    </div>
+                    <div>
+                        <p style="font-weight: 500; color: #6b7280; font-size: 0.875rem;">Created</p>
+                        <p style="font-size: 0.875rem;">${formatDate(currentScanResults.created_at)}</p>
+                    </div>
+                </div>
+                
+                <div>
+                    <h3 style="margin-bottom: 1rem;">Scanner Results</h3>
+                    ${generateScannerResults()}
+                </div>
+            `;
+        }
+
+        function generateScannerResults() {
+            const scanners = [
+                { name: 'trivy', result: currentScanResults.trivy_sbom },
+                { name: 'syft', result: currentScanResults.syft_sbom },
+                { name: 'cdxgen', result: currentScanResults.cdxgen_sbom }
+            ];
+            
+            return scanners.map(scanner => `
+                <div class="scanner-result">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap;">
+                        <h3>${scanner.name}</h3>
+                        <div class="btn-group">
+                            <button class="btn btn-outline btn-small" onclick="downloadSBOM('${scanner.name}')">
+                                📥 Download
+                            </button>
+                            <button class="btn btn-outline btn-small" onclick="viewGraph('${scanner.name}')">
+                                📊 Graph
+                            </button>
+                        </div>
+                    </div>
+                    <div class="scanner-stats">
+                        <span>Components: <strong>${scanner.result?.component_count || 0}</strong></span>
+                        <span>Status: ${scanner.result?.error ? 'Failed' : 'Success'}</span>
+                        ${scanner.result?.error ? `<span style="color: #dc2626;">Error: ${scanner.result.error}</span>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function downloadSBOM(scanner) {
+            if (currentScanResults) {
+                const url = `${API_BASE_URL}/scan/download-sbom/${currentScanResults.scan_id}/${scanner}`;
+                window.open(url, '_blank');
+            }
+        }
+
+        function viewGraph(scanner) {
+            if (currentScanResults) {
+                window.location.href = `/static/graph.html?scanId=${currentScanResults.scan_id}&scanner=${scanner}`;
+            }
+        }
+
+        function formatDate(dateString) {
+            return new Date(dateString).toLocaleString();
+        }
+
+        function isValidUrl(string) {
+            try {
+                new URL(string);
+                return string.includes('github.com');
+            } catch (_) {
+                return false;
+            }
+        }
+
+        function showError(elementId, message) {
+            document.getElementById(elementId).textContent = message;
+        }
+
+        function clearErrors() {
+            document.querySelectorAll('.error').forEach(el => el.textContent = '');
+        }
+    </script>
+</body>
+</html>

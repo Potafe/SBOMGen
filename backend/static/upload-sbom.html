@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload SBOM File - SBOM Generator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f9fafb;
+            margin: 0;
+            padding: 3rem 1rem;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 64rem;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .header h1 {
+            color: #111827;
+            font-size: 1.875rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        .header p {
+            color: #6b7280;
+            margin-bottom: 1rem;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .card-header h2 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin: 0 0 0.5rem 0;
+            color: #111827;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .card-header p {
+            color: #6b7280;
+            font-size: 0.875rem;
+            margin: 0;
+        }
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        .form-group label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+            color: #374151;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            box-sizing: border-box;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        .form-group small {
+            color: #6b7280;
+            font-size: 0.75rem;
+            margin-top: 0.25rem;
+            display: block;
+        }
+        .btn {
+            background-color: #3b82f6;
+            color: white;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            font-size: 0.875rem;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+        .btn:hover {
+            background-color: #2563eb;
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-outline {
+            background-color: transparent;
+            color: #374151;
+            border: 1px solid #d1d5db;
+            width: auto;
+            text-decoration: none;
+        }
+        .btn-outline:hover {
+            background-color: #f9fafb;
+        }
+        .btn-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .alert {
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .alert-success {
+            background-color: #dcfce7;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+        .alert-error {
+            background-color: #fee2e2;
+            color: #dc2626;
+            border: 1px solid #fecaca;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            background-color: #f3f4f6;
+            color: #374151;
+        }
+        .grid {
+            display: grid;
+            gap: 1rem;
+        }
+        .grid-cols-3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+        .grid-cols-2 {
+            grid-template-columns: repeat(2, 1fr);
+        }
+        .overview-box {
+            text-align: center;
+            padding: 1rem;
+            border-radius: 6px;
+        }
+        .overview-box h3 {
+            font-weight: 600;
+            margin: 0 0 0.5rem 0;
+        }
+        .overview-box .number {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+        .blue-box { background-color: #eff6ff; border: 1px solid #bfdbfe; }
+        .blue-box .number { color: #2563eb; }
+        .green-box { background-color: #f0fdf4; border: 1px solid #bbf7d0; }
+        .green-box .number { color: #059669; }
+        .package-list {
+            max-height: 24rem;
+            overflow-y: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+        }
+        .package-item {
+            padding: 0.75rem;
+            background-color: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+        }
+        .package-name {
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+        .package-details {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 0.25rem;
+        }
+        .package-badge {
+            background-color: #f3f4f6;
+            color: #374151;
+            padding: 0.125rem 0.375rem;
+            border-radius: 4px;
+            font-size: 0.625rem;
+        }
+        .hidden { display: none; }
+        .spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid transparent;
+            border-top: 2px solid currentColor;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        @media (max-width: 768px) {
+            .grid-cols-3, .grid-cols-2 { grid-template-columns: 1fr; }
+            .btn-group { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Upload SBOM File</h1>
+            <p>Upload and analyze your SBOM files (SPDX or CycloneDX format)</p>
+            <a href="/static/repository-scanner.html" class="btn-outline">← Back to Repository Scanner</a>
+        </div>
+
+        <!-- Upload Form Card -->
+        <div class="card">
+            <div class="card-header">
+                <h2>📤 Upload SBOM File</h2>
+                <p>Select your SBOM file and specify its format (SPDX or CycloneDX)</p>
+            </div>
+            
+            <form id="uploadForm">
+                <div class="form-group">
+                    <label for="fileInput">SBOM File</label>
+                    <input type="file" id="fileInput" accept=".json,.spdx.json,.cdx.json" required>
+                    <div id="fileInfo" class="package-details"></div>
+                </div>
+
+                <div class="form-group">
+                    <label for="formatSelect">SBOM Format</label>
+                    <select id="formatSelect" required>
+                        <option value="">Select SBOM format</option>
+                        <option value="spdx">SPDX</option>
+                        <option value="cyclonedx">CycloneDX</option>
+                    </select>
+                </div>
+
+                <div id="errorAlert" class="alert alert-error hidden">
+                    <span>⚠️</span>
+                    <span id="errorMessage"></span>
+                </div>
+
+                <div class="btn-group">
+                    <button type="submit" class="btn" id="uploadBtn">
+                        📤 Upload & Analyze
+                    </button>
+                    <button type="button" class="btn btn-outline hidden" id="newUploadBtn">
+                        New Upload
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Upload Status Card -->
+        <div class="card hidden" id="statusCard">
+            <div class="card-header">
+                <h2>✅ Upload Status</h2>
+            </div>
+            <div id="statusContent"></div>
+        </div>
+
+        <!-- SBOM Summary Card -->
+        <div class="card hidden" id="summaryCard">
+            <div class="card-header">
+                <h2>📄 SBOM Summary</h2>
+            </div>
+            <div id="summaryContent"></div>
+        </div>
+
+        <!-- Package Analysis Card -->
+        <div class="card hidden" id="analysisCard">
+            <div class="card-header">
+                <h2>📊 Package Analysis</h2>
+                <p>Detailed breakdown of packages in your SBOM</p>
+            </div>
+            <div id="analysisContent"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = '/api/v1';
+        
+        // State management
+        let currentUploadResponse = null;
+        let currentScanResults = null;
+        let currentAnalysis = null;
+
+        // DOM elements
+        const uploadForm = document.getElementById('uploadForm');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const newUploadBtn = document.getElementById('newUploadBtn');
+        const fileInput = document.getElementById('fileInput');
+        const formatSelect = document.getElementById('formatSelect');
+        const errorAlert = document.getElementById('errorAlert');
+        const statusCard = document.getElementById('statusCard');
+        const summaryCard = document.getElementById('summaryCard');
+        const analysisCard = document.getElementById('analysisCard');
+
+        // Load persisted data on page load
+        window.addEventListener('load', loadPersistedData);
+
+        function loadPersistedData() {
+            const savedUploadResponse = localStorage.getItem('uploadSbomResponse');
+            const savedScanResults = localStorage.getItem('uploadedScanResults');
+            const savedAnalysis = localStorage.getItem('uploadedSbomAnalysis');
+            
+            if (savedUploadResponse) {
+                try {
+                    currentUploadResponse = JSON.parse(savedUploadResponse);
+                    displayUploadStatus();
+                    uploadForm.style.display = 'none';
+                    newUploadBtn.classList.remove('hidden');
+                } catch (error) {
+                    console.warn('Failed to parse saved upload response:', error);
+                    localStorage.removeItem('uploadSbomResponse');
+                }
+            }
+            
+            if (savedScanResults) {
+                try {
+                    currentScanResults = JSON.parse(savedScanResults);
+                    displayScanResults();
+                } catch (error) {
+                    console.warn('Failed to parse saved scan results:', error);
+                    localStorage.removeItem('uploadedScanResults');
+                }
+            }
+            
+            if (savedAnalysis) {
+                try {
+                    currentAnalysis = JSON.parse(savedAnalysis);
+                    displayAnalysis();
+                } catch (error) {
+                    console.warn('Failed to parse saved analysis:', error);
+                    localStorage.removeItem('uploadedSbomAnalysis');
+                }
+            }
+        }
+
+        // File input change handler
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                document.getElementById('fileInfo').innerHTML = `
+                    Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)
+                `;
+                
+                // Auto-detect format based on filename
+                if (file.name.includes('spdx') || file.name.includes('SPDX')) {
+                    formatSelect.value = 'spdx';
+                } else if (file.name.includes('cdx') || file.name.includes('cyclonedx')) {
+                    formatSelect.value = 'cyclonedx';
+                }
+                
+                hideError();
+            }
+        });
+
+        // Upload form submit handler
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const file = fileInput.files[0];
+            const format = formatSelect.value;
+            
+            if (!file) {
+                showError('Please select a file');
+                return;
+            }
+            
+            if (!format) {
+                showError('Please select SBOM format');
+                return;
+            }
+            
+            uploadBtn.disabled = true;
+            uploadBtn.innerHTML = '<div class="spinner"></div> Processing...';
+            hideError();
+            
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('format', format);
+
+                const response = await fetch(`${API_BASE_URL}/scan/upload-sbom`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Upload failed');
+                }
+
+                currentUploadResponse = data;
+                localStorage.setItem('uploadSbomResponse', JSON.stringify(data));
+
+                // Fetch detailed results
+                await fetchResults(data.scan_id);
+                
+                // Hide form and show results
+                uploadForm.style.display = 'none';
+                newUploadBtn.classList.remove('hidden');
+                
+                displayUploadStatus();
+                
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.innerHTML = '📤 Upload & Analyze';
+            }
+        });
+
+        // New upload button handler
+        newUploadBtn.addEventListener('click', () => {
+            currentUploadResponse = null;
+            currentScanResults = null;
+            currentAnalysis = null;
+            
+            localStorage.removeItem('uploadSbomResponse');
+            localStorage.removeItem('uploadedScanResults');
+            localStorage.removeItem('uploadedSbomAnalysis');
+            
+            uploadForm.style.display = 'block';
+            newUploadBtn.classList.add('hidden');
+            statusCard.classList.add('hidden');
+            summaryCard.classList.add('hidden');
+            analysisCard.classList.add('hidden');
+            
+            uploadForm.reset();
+            document.getElementById('fileInfo').innerHTML = '';
+            hideError();
+        });
+
+        async function fetchResults(scanId) {
+            try {
+                // Fetch scan results
+                const resultsResponse = await fetch(`${API_BASE_URL}/scan/uploaded-sbom-results/${scanId}`);
+                if (resultsResponse.ok) {
+                    const results = await resultsResponse.json();
+                    currentScanResults = results;
+                    localStorage.setItem('uploadedScanResults', JSON.stringify(results));
+                    displayScanResults();
+                }
+
+                // Fetch analysis
+                const analysisResponse = await fetch(`${API_BASE_URL}/scan/scan-analysis/${scanId}`);
+                if (analysisResponse.ok) {
+                    const analysis = await analysisResponse.json();
+                    currentAnalysis = analysis;
+                    localStorage.setItem('uploadedSbomAnalysis', JSON.stringify(analysis));
+                    displayAnalysis();
+                }
+            } catch (error) {
+                console.error('Failed to fetch results:', error);
+            }
+        }
+
+        function displayUploadStatus() {
+            if (!currentUploadResponse) return;
+            
+            statusCard.classList.remove('hidden');
+            document.getElementById('statusContent').innerHTML = `
+                <div class="alert alert-success">
+                    <span>✅</span>
+                    <span>${currentUploadResponse.message}</span>
+                </div>
+                <div class="grid grid-cols-2" style="margin-top: 1rem;">
+                    <div>
+                        <p style="color: #6b7280; font-size: 0.875rem; margin: 0;">Scan ID</p>
+                        <p style="font-size: 0.875rem; margin: 0;">${currentUploadResponse.scan_id}</p>
+                    </div>
+                    <div>
+                        <p style="color: #6b7280; font-size: 0.875rem; margin: 0;">Format</p>
+                        <span class="status-badge">${currentUploadResponse.format.toUpperCase()}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function displayScanResults() {
+            if (!currentScanResults) return;
+            
+            summaryCard.classList.remove('hidden');
+            document.getElementById('summaryContent').innerHTML = `
+                <div class="grid grid-cols-3" style="margin-bottom: 1rem;">
+                    <div class="overview-box blue-box">
+                        <h3>File Name</h3>
+                        <p style="font-size: 1rem; font-weight: 500;">${currentScanResults.filename}</p>
+                    </div>
+                    <div class="overview-box">
+                        <h3>Original Format</h3>
+                        <span class="status-badge">${currentScanResults.original_format.toUpperCase()}</span>
+                    </div>
+                    <div class="overview-box green-box">
+                        <h3>Components</h3>
+                        <p class="number">${currentScanResults.uploaded_sbom?.component_count || 0}</p>
+                    </div>
+                </div>
+                
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-outline" onclick="downloadSBOM()" style="display: flex; align-items: center; gap: 0.5rem;">
+                        📥 Download Processed SBOM
+                    </button>
+                </div>
+            `;
+        }
+
+        function displayAnalysis() {
+            if (!currentAnalysis) return;
+            
+            analysisCard.classList.remove('hidden');
+            document.getElementById('analysisContent').innerHTML = `
+                <div class="grid grid-cols-2" style="margin-bottom: 1.5rem;">
+                    <div class="overview-box blue-box">
+                        <h3>Total Packages</h3>
+                        <p class="number">${currentAnalysis.total_count || 0}</p>
+                    </div>
+                    <div class="overview-box green-box">
+                        <h3>Components Count</h3>
+                        <p class="number">${currentAnalysis.component_count || 0}</p>
+                    </div>
+                </div>
+
+                <div>
+                    <h4 style="margin-bottom: 0.75rem;">Package Details</h4>
+                    <div class="package-list">
+                        ${displayPackageList()}
+                    </div>
+                </div>
+            `;
+        }
+
+        function displayPackageList() {
+            if (!currentAnalysis.packages || currentAnalysis.packages.length === 0) {
+                return '<p style="color: #6b7280; padding: 1rem;">No packages found</p>';
+            }
+            
+            const packages = currentAnalysis.packages.slice(0, 50); // Show first 50 packages
+            
+            let html = packages.map(pkg => `
+                <div class="package-item">
+                    <div style="flex: 1;">
+                        <div class="package-name">${pkg.name || 'Unknown'}</div>
+                        ${pkg.version ? `<div class="package-details">Version: ${pkg.version}</div>` : ''}
+                        ${pkg.purl ? `<div class="package-details">PURL: ${pkg.purl}</div>` : ''}
+                        ${pkg.cpe ? `<div class="package-details">CPE: ${pkg.cpe}</div>` : ''}
+                    </div>
+                    ${pkg.type ? `<span class="package-badge">${pkg.type}</span>` : ''}
+                </div>
+            `).join('');
+            
+            if (currentAnalysis.packages.length > 50) {
+                html += `
+                    <div style="text-align: center; padding: 1rem; color: #6b7280; font-size: 0.875rem;">
+                        Showing first 50 packages out of ${currentAnalysis.packages.length} total
+                    </div>
+                `;
+            }
+            
+            return html;
+        }
+
+        async function downloadSBOM() {
+            if (!currentUploadResponse) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/scan/download-sbom/${currentUploadResponse.scan_id}/uploaded`);
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = `processed-${currentScanResults?.filename || 'sbom'}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                }
+            } catch (error) {
+                console.error('Download failed:', error);
+                showError('Failed to download SBOM file');
+            }
+        }
+
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            errorAlert.classList.remove('hidden');
+        }
+
+        function hideError() {
+            errorAlert.classList.add('hidden');
+        }
+    </script>
+</body>
+</html>

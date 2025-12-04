@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     TRIVY_TIMEOUT: int = 3000
     SYFT_TIMEOUT: int = 3000
     CDXGEN_TIMEOUT: int = 3000
+    CYCLONEDX_CONVERT_TIMEOUT: int = 100
 
     class Config:
         env_file = ".env"

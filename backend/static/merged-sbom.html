@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Merged SBOM - SBOM Generator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f9fafb;
+            margin: 0;
+            padding: 3rem 1rem;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 80rem;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .header h1 {
+            color: #111827;
+            font-size: 1.875rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .btn {
+            background-color: #3b82f6;
+            color: white;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            font-size: 0.875rem;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn-outline {
+            background-color: transparent;
+            color: #374151;
+            border: 1px solid #d1d5db;
+        }
+        .code-block {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 1rem;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.875rem;
+            overflow-x: auto;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #6b7280;
+        }
+        .error {
+            text-align: center;
+            padding: 2rem;
+            color: #dc2626;
+        }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Merged SBOM</h1>
+            <div>
+                <a href="/static/repository-scanner.html" class="btn btn-outline">← Back to Scanner</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <div id="loading" class="loading">
+                <p>Loading merged SBOM...</p>
+            </div>
+
+            <div id="error" class="error hidden">
+                <p>Failed to load merged SBOM</p>
+            </div>
+
+            <div id="content" class="hidden">
+                <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 1rem;">
+                    <h2 style="margin: 0;">Merged SBOM Data</h2>
+                    <button class="btn" onclick="downloadMergedSBOM()">📥 Download Merged SBOM</button>
+                </div>
+                
+                <div class="code-block" id="sbomContent">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = '/api/v1';
+        
+        // Get scan ID from URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const scanId = urlParams.get('scanId');
+
+        if (!scanId) {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('error').classList.remove('hidden');
+            document.getElementById('error').innerHTML = '<p>No scan ID provided</p>';
+        } else {
+            loadMergedSBOM();
+        }
+
+        async function loadMergedSBOM() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/scan/merge-sbom/${scanId}`);
+                
+                if (!response.ok) {
+                    throw new Error('Failed to fetch merged SBOM');
+                }
+                
+                const mergedSbom = await response.json();
+                
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('content').classList.remove('hidden');
+                
+                // Display the merged SBOM as formatted JSON
+                document.getElementById('sbomContent').textContent = JSON.stringify(mergedSbom, null, 2);
+                
+            } catch (error) {
+                console.error('Failed to fetch merged SBOM:', error);
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('error').classList.remove('hidden');
+                document.getElementById('error').innerHTML = `<p>Error: ${error.message}</p>`;
+            }
+        }
+
+        async function downloadMergedSBOM() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/scan/download-merged-sbom/${scanId}`);
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = `merged-sbom-${scanId}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                }
+            } catch (error) {
+                console.error('Download failed:', error);
+            }
+        }
+    </script>
+</body>
+</html>

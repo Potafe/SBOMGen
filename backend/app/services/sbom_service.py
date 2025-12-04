@@ -11,7 +11,11 @@ from typing import Dict, Optional, List, Any, Tuple
 from datetime import datetime
 from git import Repo
 
-from app.schemas.scan import ScanResults, ScanStatus, SBOMResult, ScannerType
+from app.schemas.scan import (
+    ScanResults, ScanStatus, 
+    SBOMResult, ScannerType,
+    UploadedScanResults
+)
 from app.core.config import settings
 from app.utils.tech_stack import detect_tech_stack
 from app.services.package_analyze import PackageAnalyze
@@ -20,9 +24,10 @@ logger = logging.getLogger(__name__)
 
 class SBOMService:
     def __init__(self):
-        self.scans: Dict[str, ScanResults] = {} # In-memory storage (will replace with DB later)
+        self.scans: Dict[str, ScanResults] = {} # In-memory storage (will replace with DB later if needed)
         self.docker_client = docker.from_env()
         self.package_analyzer = PackageAnalyze()
+        self.uploaded_scans: Dict[str, UploadedScanResults] = {}
 
     async def start_scan(self, repo_url: str, github_token: Optional[str] = None) -> str:
         scan_id = str(uuid.uuid4())
@@ -140,28 +145,49 @@ class SBOMService:
         return self.scans.get(scan_id)
 
     async def get_scan_status(self, scan_id: str) -> Optional[str]:
-        scan = self.scans.get(scan_id)
+        scan = self.scans.get(scan_id) or self.uploaded_scans.get(scan_id)
         status = scan.status.value if scan else None
         logger.info(f"Status for scan {scan_id}: {status}")
         return status
     
     async def get_scanner_sbom(self, scan_id: str, scanner: ScannerType) -> Optional[Dict[str, Any]]:
         scan = self.scans.get(scan_id)
-        if not scan:
-            return None
         
-        if scanner == ScannerType.TRIVY:
-            return scan.trivy_sbom.sbom if scan.trivy_sbom else None
-        elif scanner == ScannerType.SYFT:
-            return scan.syft_sbom.sbom if scan.syft_sbom else None
-        elif scanner == ScannerType.CDXGEN:
-            return scan.cdxgen_sbom.sbom if scan.cdxgen_sbom else None
+        if scan:
+            if scanner == ScannerType.TRIVY:
+                return scan.trivy_sbom.sbom if scan.trivy_sbom else None
+            elif scanner == ScannerType.SYFT:
+                return scan.syft_sbom.sbom if scan.syft_sbom else None
+            elif scanner == ScannerType.CDXGEN:
+                return scan.cdxgen_sbom.sbom if scan.cdxgen_sbom else None
+            elif scanner == ScannerType.UPLOADED:
+                return scan.uploaded_sbom.sbom if scan.uploaded_sbom else None
+        
+        if scanner == ScannerType.UPLOADED:
+            uploaded_scan = self.uploaded_scans.get(scan_id)
+            if uploaded_scan and uploaded_scan.uploaded_sbom:
+                return uploaded_scan.uploaded_sbom.sbom
         
         return None
     
     async def get_scan_analysis(self, scan_id: str) -> Dict:
         """Get analysis data for a scan."""
         try:
+            uploaded_results = await self.get_uploaded_scan_results(scan_id)
+            if uploaded_results and uploaded_results.uploaded_sbom:
+                logger.info(f"Getting analysis for uploaded scan {scan_id}")
+                sbom_data = uploaded_results.uploaded_sbom.sbom
+                if sbom_data:
+                    pkg_list = self.package_analyzer._extract_packages(sbom_data, ScannerType.UPLOADED)
+                    return {
+                        "packages": pkg_list,
+                        "total_count": len(pkg_list),
+                        "scanner": "uploaded",
+                        "filename": uploaded_results.filename,
+                        "original_format": uploaded_results.original_format,
+                        "component_count": uploaded_results.uploaded_sbom.component_count
+                    }
+                
             results = await self.get_scan_results(scan_id)
             if not results:
                 return {}
@@ -201,3 +227,87 @@ class SBOMService:
             return {"error": "SBOM not found for this scanner"}
         
         return self.package_analyzer._parse_sbom_graph(sbom_data)
+    
+    async def process_uploaded_sbom(self, filename: str, file_content: bytes, sbom_format: str) -> str:
+        """Process an uploaded SBOM file and return scan_id."""
+        scan_id = str(uuid.uuid4())
+        logger.info(f"Processing uploaded SBOM: {filename}, format: {sbom_format}, scan_id: {scan_id}")
+        
+        # Create uploaded scan entry
+        uploaded_scan = UploadedScanResults(
+            scan_id=scan_id,
+            status=ScanStatus.IN_PROGRESS,
+            filename=filename,
+            original_format=sbom_format,
+            created_at=datetime.now()
+        )
+        self.uploaded_scans[scan_id] = uploaded_scan
+        
+        try:
+            # Save uploaded file temporarily
+            temp_dir = os.path.join(settings.TEMP_DIR, scan_id)
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            original_file_path = os.path.join(temp_dir, f"original_{filename}")
+            with open(original_file_path, 'wb') as f:
+                f.write(file_content)
+            
+            # Process based on format
+            if sbom_format.lower() == "spdx":
+                logger.info(f"Converting SPDX to CycloneDX for scan {scan_id}")
+                cyclonedx_file_path = os.path.join(temp_dir, f"converted_{filename}")
+                
+                # Convert SPDX to CycloneDX using cyclonedx-cli
+                result = subprocess.run([
+                    "cyclonedx", "convert",
+                    "--input-file", original_file_path,
+                    "--input-format", "spdxjson",
+                    "--output-format", "json",
+                    "--output-file", cyclonedx_file_path
+                ], capture_output=True, text=True, timeout=30)
+                
+                if result.returncode != 0:
+                    logger.error(f"CycloneDX conversion failed for scan {scan_id}: {result.stderr}")
+                    raise Exception(f"Failed to convert SPDX to CycloneDX: {result.stderr}")
+                
+                logger.info(f"CycloneDX conversion logs for scan {scan_id}: {result.stdout}")
+                
+                # Load the converted file
+                with open(cyclonedx_file_path, 'r', encoding='utf-8') as f:
+                    sbom_data = json.load(f)
+                    
+            elif sbom_format.lower() == "cyclonedx":
+                logger.info(f"Processing CycloneDX SBOM for scan {scan_id}")
+                # Load the file directly as it's already in CycloneDX format
+                with open(original_file_path, 'r', encoding='utf-8') as f:
+                    sbom_data = json.load(f)
+            else:
+                raise Exception(f"Unsupported SBOM format: {sbom_format}")
+            
+            # Count components
+            component_count = len(sbom_data.get("components", []))
+            logger.info(f"Uploaded SBOM for scan {scan_id} contains {component_count} components")
+            
+            # Create SBOM result
+            sbom_result = SBOMResult(
+                scanner=ScannerType.UPLOADED,
+                sbom=sbom_data,
+                component_count=component_count
+            )
+            
+            # Update the uploaded scan
+            uploaded_scan.uploaded_sbom = sbom_result
+            uploaded_scan.status = ScanStatus.COMPLETED
+            uploaded_scan.completed_at = datetime.now()
+            
+            logger.info(f"Successfully processed uploaded SBOM for scan {scan_id}")
+            return scan_id
+            
+        except Exception as e:
+            logger.error(f"Failed to process uploaded SBOM for scan {scan_id}: {e}")
+            uploaded_scan.status = ScanStatus.FAILED
+            raise e
+        
+    async def get_uploaded_scan_results(self, scan_id: str) -> Optional[UploadedScanResults]:
+        logger.info(f"Retrieving uploaded scan results for scan {scan_id}")
+        return self.uploaded_scans.get(scan_id)

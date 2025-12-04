@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SBOM Graph - SBOM Generator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f9fafb;
+            margin: 0;
+            padding: 3rem 1rem;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 80rem;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .header h1 {
+            color: #111827;
+            font-size: 1.875rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .btn {
+            background-color: #3b82f6;
+            color: white;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            font-size: 0.875rem;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn-outline {
+            background-color: transparent;
+            color: #374151;
+            border: 1px solid #d1d5db;
+        }
+        #graph {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            position: relative;
+            overflow: hidden;
+        }
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #6b7280;
+        }
+        .error {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #dc2626;
+        }
+        .hidden { display: none; }
+        .graph-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .info-box {
+            text-align: center;
+            padding: 1rem;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            background: #f9fafb;
+        }
+        .info-box .number {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #3b82f6;
+        }
+        .info-box .label {
+            font-size: 0.875rem;
+            color: #6b7280;
+        }
+        .simple-graph {
+            padding: 2rem;
+            text-align: center;
+        }
+        .package-list {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 1rem;
+        }
+        .package-item {
+            padding: 0.5rem;
+            border-bottom: 1px solid #f3f4f6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .package-item:last-child {
+            border-bottom: none;
+        }
+        .package-name {
+            font-weight: 500;
+        }
+        .package-version {
+            color: #6b7280;
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>SBOM Graph Visualization</h1>
+            <div>
+                <button class="btn btn-outline" onclick="goBack()">← Back to Analysis</button>
+                <a href="/static/repository-scanner.html" class="btn btn-outline">🏠 Home</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <div id="scannerInfo">
+                <!-- Will be populated by JavaScript -->
+            </div>
+            
+            <div class="graph-info" id="graphInfo" style="display: none;">
+                <div class="info-box">
+                    <div class="number" id="nodeCount">-</div>
+                    <div class="label">Total Components</div>
+                </div>
+                <div class="info-box">
+                    <div class="number" id="edgeCount">-</div>
+                    <div class="label">Dependencies</div>
+                </div>
+                <div class="info-box">
+                    <div class="number" id="rootCount">-</div>
+                    <div class="label">Root Packages</div>
+                </div>
+            </div>
+
+            <div id="graph">
+                <div class="loading" id="loading">
+                    <p>Loading graph data...</p>
+                </div>
+                <div class="error hidden" id="error">
+                    <p>Failed to load graph data</p>
+                </div>
+                <div class="simple-graph hidden" id="simpleGraph">
+                    <!-- Fallback simple representation -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Package List -->
+        <div class="card">
+            <h3>Package List</h3>
+            <div class="package-list" id="packageList">
+                <div class="loading">Loading packages...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = '/api/v1';
+        
+        // Get parameters from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const scanId = urlParams.get('scanId');
+        const scanner = urlParams.get('scanner');
+
+        if (!scanId || !scanner) {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('error').classList.remove('hidden');
+            document.getElementById('error').innerHTML = '<p>Missing scan ID or scanner parameter</p>';
+        } else {
+            document.getElementById('scannerInfo').innerHTML = `
+                <h2>${scanner.toUpperCase()} Dependency Graph</h2>
+                <p>Scan ID: ${scanId}</p>
+            `;
+            loadGraphData();
+        }
+
+        async function loadGraphData() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/scan/scan-graph/${scanId}/${scanner}`);
+                
+                if (!response.ok) {
+                    throw new Error('Failed to fetch graph data');
+                }
+                
+                const graphData = await response.json();
+                
+                if (graphData.error) {
+                    throw new Error(graphData.error);
+                }
+                
+                displayGraphData(graphData);
+                
+            } catch (error) {
+                console.error('Failed to fetch graph data:', error);
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('error').classList.remove('hidden');
+                document.getElementById('error').innerHTML = `<p>Error: ${error.message}</p>`;
+            }
+        }
+
+        function displayGraphData(data) {
+            document.getElementById('loading').classList.add('hidden');
+            
+            // Update graph info
+            document.getElementById('graphInfo').style.display = 'grid';
+            document.getElementById('nodeCount').textContent = data.nodes?.length || 0;
+            document.getElementById('edgeCount').textContent = data.edges?.length || 0;
+            document.getElementById('rootCount').textContent = data.root_nodes?.length || 0;
+            
+            // Display simple graph representation
+            displaySimpleGraph(data);
+            
+            // Display package list
+            displayPackageList(data);
+        }
+
+        function displaySimpleGraph(data) {
+            const simpleGraph = document.getElementById('simpleGraph');
+            simpleGraph.classList.remove('hidden');
+            
+            if (!data.nodes || data.nodes.length === 0) {
+                simpleGraph.innerHTML = '<p>No graph data available for visualization</p>';
+                return;
+            }
+            
+            // Create a simple hierarchical representation
+            const rootNodes = data.root_nodes || [];
+            const allNodes = data.nodes || [];
+            
+            let graphHtml = '<div style="text-align: left; max-width: 600px; margin: 0 auto;">';
+            
+            if (rootNodes.length > 0) {
+                graphHtml += '<h4>Root Dependencies:</h4>';
+                rootNodes.forEach(rootId => {
+                    const rootNode = allNodes.find(n => n.id === rootId);
+                    if (rootNode) {
+                        graphHtml += `
+                            <div style="margin: 0.5rem 0; padding: 0.5rem; background: #f3f4f6; border-radius: 4px;">
+                                📦 <strong>${rootNode.name}</strong>
+                                ${rootNode.version ? ` v${rootNode.version}` : ''}
+                                ${getChildDependencies(rootId, data, 1)}
+                            </div>
+                        `;
+                    }
+                });
+            } else {
+                graphHtml += '<h4>All Components:</h4>';
+                graphHtml += `<p>Total components: ${allNodes.length}</p>`;
+                graphHtml += '<div style="max-height: 300px; overflow-y: auto;">';
+                allNodes.slice(0, 20).forEach(node => {
+                    graphHtml += `
+                        <div style="margin: 0.25rem 0; padding: 0.25rem; background: #f9fafb; border-radius: 4px;">
+                            📦 ${node.name} ${node.version ? `v${node.version}` : ''}
+                        </div>
+                    `;
+                });
+                if (allNodes.length > 20) {
+                    graphHtml += `<p style="color: #6b7280;">... and ${allNodes.length - 20} more components</p>`;
+                }
+                graphHtml += '</div>';
+            }
+            
+            graphHtml += '</div>';
+            simpleGraph.innerHTML = graphHtml;
+        }
+
+        function getChildDependencies(parentId, data, depth) {
+            if (depth > 3) return ''; // Limit depth to avoid too deep nesting
+            
+            const edges = data.edges || [];
+            const nodes = data.nodes || [];
+            const children = edges.filter(e => e.source === parentId);
+            
+            if (children.length === 0) return '';
+            
+            let html = '<div style="margin-left: 1rem; border-left: 2px solid #e5e7eb; padding-left: 0.5rem;">';
+            children.slice(0, 5).forEach(edge => { // Limit to 5 children per level
+                const childNode = nodes.find(n => n.id === edge.target);
+                if (childNode) {
+                    html += `
+                        <div style="margin: 0.25rem 0; font-size: 0.875rem; color: #6b7280;">
+                            ↳ ${childNode.name} ${childNode.version ? `v${childNode.version}` : ''}
+                            ${getChildDependencies(childNode.id, data, depth + 1)}
+                        </div>
+                    `;
+                }
+            });
+            if (children.length > 5) {
+                html += `<div style="margin: 0.25rem 0; font-size: 0.75rem; color: #9ca3af;">... and ${children.length - 5} more dependencies</div>`;
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function displayPackageList(data) {
+            const packageList = document.getElementById('packageList');
+            const nodes = data.nodes || [];
+            
+            if (nodes.length === 0) {
+                packageList.innerHTML = '<p>No packages found</p>';
+                return;
+            }
+            
+            packageList.innerHTML = nodes.map(node => `
+                <div class="package-item">
+                    <div>
+                        <div class="package-name">${node.name}</div>
+                        ${node.version ? `<div class="package-version">Version: ${node.version}</div>` : ''}
+                    </div>
+                    <div class="package-version">
+                        ${node.type || 'Unknown'}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function goBack() {
+            window.history.back();
+        }
+    </script>
+</body>
+</html>

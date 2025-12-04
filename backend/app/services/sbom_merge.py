@@ -100,10 +100,11 @@ class SBOMMerge:
             
             cmd = [
                 'cyclonedx', 'merge',
-                '--input-files', ' '.join(temp_files),
+                '--input-files'
+            ] + temp_files + [
                 '--output-file', output_file.name,
                 '--output-format', 'json',
-                '--output-version', 'v1_5'
+                '--output-version', 'v1_6'
             ]
             
             result = subprocess.run(
@@ -115,12 +116,15 @@ class SBOMMerge:
                     merged_data = json.load(f)
                 
                 merged_data['metadata'] = merged_data.get('metadata', {})
-                merged_data['metadata']['tools'] = merged_data['metadata'].get('tools', [])
-                merged_data['metadata']['tools'].append({
+                tools = merged_data['metadata'].get('tools', [])
+                if not isinstance(tools, list):
+                    tools = []
+                tools.append({
                     'vendor': 'SBOMGen',
                     'name': 'sbom-merger',
-                    'version': '1.0.0'
+                    'version': '0.0.1'
                 })
+                merged_data['metadata']['tools'] = tools
                 merged_data['metadata']['timestamp'] = datetime.now().isoformat()
                 
                 os.unlink(output_file.name)
@@ -143,7 +147,7 @@ class SBOMMerge:
                     pass
     
 
-    #TODO: implement this function, in case cyclondex fails
+    #TODO: implement this function, in case cyclondex fails (not a priority now)
     
     # async def _custom_merge(self, scan_id: str, valid_sboms: List[tuple]) -> Dict[str, Any]:
     #     """
