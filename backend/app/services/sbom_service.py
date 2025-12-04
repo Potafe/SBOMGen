@@ -19,15 +19,14 @@ from app.schemas.scan import (
 from app.core.config import settings
 from app.utils.tech_stack import detect_tech_stack
 from app.services.package_analyze import PackageAnalyze
+from app.services.database_service import db_service
 
 logger = logging.getLogger(__name__)
 
 class SBOMService:
     def __init__(self):
-        self.scans: Dict[str, ScanResults] = {} # In-memory storage (will replace with DB later if needed)
         self.docker_client = docker.from_env()
         self.package_analyzer = PackageAnalyze()
-        self.uploaded_scans: Dict[str, UploadedScanResults] = {}
 
     async def start_scan(self, repo_url: str, github_token: Optional[str] = None) -> str:
         scan_id = str(uuid.uuid4())
@@ -39,11 +38,11 @@ class SBOMService:
             created_at=datetime.now(),
             tech_stack=detect_tech_stack(str(repo_url), github_token)
         )
-        self.scans[scan_id] = scan
+        await db_service.save_scan_results(scan)
         return scan_id
     
     async def run_scan(self, scan_id: str, github_token: Optional[str] = None):
-        scan = self.scans.get(scan_id)
+        scan = await db_service.get_scan_results(scan_id)
         if not scan:
             return
 
@@ -72,10 +71,14 @@ class SBOMService:
             scan.status = ScanStatus.COMPLETED
             scan.completed_at = datetime.now()
             logger.info(f"Scan {scan_id} completed successfully")
+            
+            # Save updated scan results
+            await db_service.save_scan_results(scan)
 
             # await self._handle_reruns(scan_id)
         except Exception as e:
             scan.status = ScanStatus.FAILED
+            await db_service.save_scan_results(scan)
             logger.error(f"Scan {scan_id} failed: {e}")
             print(f"Scan failed: {e}")
 
@@ -142,16 +145,18 @@ class SBOMService:
 
     async def get_scan_results(self, scan_id: str) -> Optional[ScanResults]:
         logger.info(f"Retrieving results for scan {scan_id}")
-        return self.scans.get(scan_id)
+        return await db_service.get_scan_results(scan_id)
 
     async def get_scan_status(self, scan_id: str) -> Optional[str]:
-        scan = self.scans.get(scan_id) or self.uploaded_scans.get(scan_id)
+        scan = await db_service.get_scan_results(scan_id)
+        if not scan:
+            scan = await db_service.get_uploaded_scan_results(scan_id)
         status = scan.status.value if scan else None
         logger.info(f"Status for scan {scan_id}: {status}")
         return status
     
     async def get_scanner_sbom(self, scan_id: str, scanner: ScannerType) -> Optional[Dict[str, Any]]:
-        scan = self.scans.get(scan_id)
+        scan = await db_service.get_scan_results(scan_id)
         
         if scan:
             if scanner == ScannerType.TRIVY:
@@ -164,7 +169,7 @@ class SBOMService:
                 return scan.uploaded_sbom.sbom if scan.uploaded_sbom else None
         
         if scanner == ScannerType.UPLOADED:
-            uploaded_scan = self.uploaded_scans.get(scan_id)
+            uploaded_scan = await db_service.get_uploaded_scan_results(scan_id)
             if uploaded_scan and uploaded_scan.uploaded_sbom:
                 return uploaded_scan.uploaded_sbom.sbom
         
@@ -241,7 +246,7 @@ class SBOMService:
             original_format=sbom_format,
             created_at=datetime.now()
         )
-        self.uploaded_scans[scan_id] = uploaded_scan
+        await db_service.save_uploaded_scan_results(uploaded_scan)
         
         try:
             # Save uploaded file temporarily
@@ -300,14 +305,18 @@ class SBOMService:
             uploaded_scan.status = ScanStatus.COMPLETED
             uploaded_scan.completed_at = datetime.now()
             
+            # Save updated uploaded scan results
+            await db_service.save_uploaded_scan_results(uploaded_scan)
+            
             logger.info(f"Successfully processed uploaded SBOM for scan {scan_id}")
             return scan_id
             
         except Exception as e:
             logger.error(f"Failed to process uploaded SBOM for scan {scan_id}: {e}")
             uploaded_scan.status = ScanStatus.FAILED
+            await db_service.save_uploaded_scan_results(uploaded_scan)
             raise e
         
     async def get_uploaded_scan_results(self, scan_id: str) -> Optional[UploadedScanResults]:
         logger.info(f"Retrieving uploaded scan results for scan {scan_id}")
-        return self.uploaded_scans.get(scan_id)
+        return await db_service.get_uploaded_scan_results(scan_id)

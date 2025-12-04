@@ -312,44 +312,47 @@
         const summaryCard = document.getElementById('summaryCard');
         const analysisCard = document.getElementById('analysisCard');
 
-        // Load persisted data on page load
-        window.addEventListener('load', loadPersistedData);
+        // Check for scan ID in URL parameters on page load
+        window.addEventListener('load', checkUrlParams);
 
-        function loadPersistedData() {
-            const savedUploadResponse = localStorage.getItem('uploadSbomResponse');
-            const savedScanResults = localStorage.getItem('uploadedScanResults');
-            const savedAnalysis = localStorage.getItem('uploadedSbomAnalysis');
+        function checkUrlParams() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const scanId = urlParams.get('scanId');
             
-            if (savedUploadResponse) {
-                try {
-                    currentUploadResponse = JSON.parse(savedUploadResponse);
-                    displayUploadStatus();
+            if (scanId) {
+                // Load existing uploaded scan
+                loadExistingUpload(scanId);
+            }
+        }
+
+        async function loadExistingUpload(scanId) {
+            try {
+                // Check status first
+                const statusResponse = await fetch(`${API_BASE_URL}/scan/scan-status/${scanId}`);
+                const statusData = await statusResponse.json();
+                
+                if (statusData.status === 'completed') {
+                    const resultsResponse = await fetch(`${API_BASE_URL}/scan/uploaded-sbom-results/${scanId}`);
+                    const results = await resultsResponse.json();
+                    
+                    currentScanResults = results;
+                    currentUploadResponse = { scan_id: scanId, message: 'SBOM processed successfully' };
+                    
                     uploadForm.style.display = 'none';
                     newUploadBtn.classList.remove('hidden');
-                } catch (error) {
-                    console.warn('Failed to parse saved upload response:', error);
-                    localStorage.removeItem('uploadSbomResponse');
-                }
-            }
-            
-            if (savedScanResults) {
-                try {
-                    currentScanResults = JSON.parse(savedScanResults);
+                    displayUploadStatus();
                     displayScanResults();
-                } catch (error) {
-                    console.warn('Failed to parse saved scan results:', error);
-                    localStorage.removeItem('uploadedScanResults');
+                    loadAnalysis();
+                } else {
+                    // Still in progress
+                    currentUploadResponse = { scan_id: scanId, message: 'Processing SBOM...' };
+                    uploadForm.style.display = 'none';
+                    newUploadBtn.classList.remove('hidden');
+                    displayUploadStatus();
+                    startPolling();
                 }
-            }
-            
-            if (savedAnalysis) {
-                try {
-                    currentAnalysis = JSON.parse(savedAnalysis);
-                    displayAnalysis();
-                } catch (error) {
-                    console.warn('Failed to parse saved analysis:', error);
-                    localStorage.removeItem('uploadedSbomAnalysis');
-                }
+            } catch (error) {
+                console.error('Failed to load existing upload:', error);
             }
         }
 
@@ -410,7 +413,11 @@
                 }
 
                 currentUploadResponse = data;
-                localStorage.setItem('uploadSbomResponse', JSON.stringify(data));
+                
+                // Update URL to include scan ID
+                const newUrl = new URL(window.location);
+                newUrl.searchParams.set('scanId', data.scan_id);
+                window.history.replaceState({}, '', newUrl);
 
                 // Fetch detailed results
                 await fetchResults(data.scan_id);
@@ -435,9 +442,10 @@
             currentScanResults = null;
             currentAnalysis = null;
             
-            localStorage.removeItem('uploadSbomResponse');
-            localStorage.removeItem('uploadedScanResults');
-            localStorage.removeItem('uploadedSbomAnalysis');
+            // Clear URL parameters
+            const newUrl = new URL(window.location);
+            newUrl.searchParams.delete('scanId');
+            window.history.replaceState({}, '', newUrl);
             
             uploadForm.style.display = 'block';
             newUploadBtn.classList.add('hidden');
@@ -457,7 +465,6 @@
                 if (resultsResponse.ok) {
                     const results = await resultsResponse.json();
                     currentScanResults = results;
-                    localStorage.setItem('uploadedScanResults', JSON.stringify(results));
                     displayScanResults();
                 }
 
@@ -466,7 +473,6 @@
                 if (analysisResponse.ok) {
                     const analysis = await analysisResponse.json();
                     currentAnalysis = analysis;
-                    localStorage.setItem('uploadedSbomAnalysis', JSON.stringify(analysis));
                     displayAnalysis();
                 }
             } catch (error) {

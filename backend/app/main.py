@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -5,13 +6,22 @@ from fastapi.responses import FileResponse
 
 from app.api.v1.api import api_router
 from app.core.config import settings
+from app.database import init_db
 
 from pathlib import Path
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    await init_db()
+    yield
+    # Shutdown (nothing to do for now)
 
 app = FastAPI(
     title="SBOM Generator Beta",
     description="API for generating SBOM using trivy, syft and cdxgen",
-    version="0.0.1"
+    version="0.0.1",
+    lifespan=lifespan
 )
 
 app.add_middleware(

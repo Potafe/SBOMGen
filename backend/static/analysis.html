@@ -256,35 +256,14 @@
 
         async function loadAnalysis() {
             try {
-                // Check cache first
-                const cacheKey = `analysis_${scanId}`;
-                const cachedData = localStorage.getItem(cacheKey);
-                
-                let analysis;
-                if (cachedData) {
-                    try {
-                        analysis = JSON.parse(cachedData);
-                        displayAnalysis(analysis);
-                        document.getElementById('loading').classList.add('hidden');
-                        document.getElementById('content').classList.remove('hidden');
-                        return;
-                    } catch (error) {
-                        console.warn('Failed to parse cached analysis data:', error);
-                        localStorage.removeItem(cacheKey);
-                    }
-                }
-
-                // Fetch from API
+                // Fetch from API directly (no localStorage caching to avoid quota issues)
                 const response = await fetch(`${API_BASE_URL}/scan/scan-analysis/${scanId}`);
                 
                 if (!response.ok) {
                     throw new Error('Failed to fetch analysis');
                 }
                 
-                analysis = await response.json();
-                
-                // Cache the data
-                localStorage.setItem(cacheKey, JSON.stringify(analysis));
+                const analysis = await response.json();
                 
                 displayAnalysis(analysis);
                 document.getElementById('loading').classList.add('hidden');
