@@ -42,6 +42,7 @@ class ScanResults(BaseModel):
     trivy_sbom: Optional[SBOMResult] = None
     syft_sbom: Optional[SBOMResult] = None
     cdxgen_sbom: Optional[SBOMResult] = None
+    ghas_sbom: Optional[SBOMResult] = None
     tech_stack: Optional[List[str]] = None
     uploaded_sbom: Optional[SBOMResult] = None
 

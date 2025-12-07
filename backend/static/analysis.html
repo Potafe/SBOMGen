@@ -5,492 +5,439 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Scan Analysis - SBOM Generator</title>
     <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: #f9fafb;
-            margin: 0;
-            padding: 3rem 1rem;
-            min-height: 100vh;
+            background: #f5f5f5;
+            padding: 20px;
+            line-height: 1.6;
         }
-        .container {
-            max-width: 80rem;
-            margin: 0 auto;
+        
+        .container { max-width: 1200px; margin: 0 auto; }
+        
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: #333;
         }
-        .header {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-        .header h1 {
-            color: #111827;
-            font-size: 1.875rem;
-            font-weight: 700;
-            margin-bottom: 0.5rem;
-        }
+        
         .card {
             background: white;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 20px;
+            margin-bottom: 20px;
         }
-        .card-header h2 {
-            font-size: 1.125rem;
-            font-weight: 600;
-            margin: 0 0 0.5rem 0;
-            color: #111827;
+        
+        .card h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #555;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
         }
-        .card-header p {
-            color: #6b7280;
-            font-size: 0.875rem;
-            margin: 0;
-        }
-        .grid {
+        
+        .stats-grid {
             display: grid;
-            gap: 1rem;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
         }
-        .grid-cols-3 {
-            grid-template-columns: repeat(3, 1fr);
-        }
-        .grid-cols-2 {
-            grid-template-columns: repeat(2, 1fr);
-        }
-        .overview-box {
+        
+        .stat-box {
+            border: 1px solid #e0e0e0;
+            padding: 15px;
+            border-radius: 4px;
             text-align: center;
-            padding: 1rem;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
         }
-        .overview-box h3 {
+        
+        .stat-box .label {
+            font-size: 12px;
+            color: #777;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .stat-box .value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #333;
+            margin: 5px 0;
+        }
+        
+        .stat-box .sublabel {
+            font-size: 11px;
+            color: #999;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        
+        th, td {
+            text-align: left;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        th {
+            background: #f9f9f9;
             font-weight: 600;
-            margin: 0 0 0.5rem 0;
-            text-transform: capitalize;
+            color: #555;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
         }
-        .overview-box .number {
-            font-size: 1.5rem;
-            font-weight: 700;
+        
+        tr:hover { background: #fafafa; }
+        
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 500;
+            margin-right: 5px;
         }
-        .overview-box .label {
-            font-size: 0.875rem;
-            color: #6b7280;
+        
+        .badge-exact { background: #d4edda; color: #155724; }
+        .badge-fuzzy { background: #fff3cd; color: #856404; }
+        .badge-unique { background: #d1ecf1; color: #0c5460; }
+        .badge-scanner { background: #e9ecef; color: #495057; }
+        .badge-duplicate { background: #f8d7da; color: #721c24; }
+        
+        .similarity {
+            font-size: 11px;
+            color: #666;
         }
-        .scanner-section {
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
+        
+        .pkg-name {
+            font-weight: 500;
+            color: #333;
         }
-        .scanner-header {
+        
+        .pkg-version {
+            color: #666;
+            font-size: 12px;
+        }
+        
+        .similar-to {
+            font-size: 11px;
+            color: #888;
+            margin-top: 5px;
+            padding: 5px;
+            background: #f9f9f9;
+            border-left: 2px solid #ddd;
+        }
+        
+        .loading, .error {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error { color: #d32f2f; }
+        .hidden { display: none; }
+        
+        .btn {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 13px;
+            border: none;
+            cursor: pointer;
+        }
+        
+        .btn:hover { background: #0056b3; }
+        .btn-outline {
+            background: white;
+            color: #007bff;
+            border: 1px solid #007bff;
+        }
+        .btn-outline:hover {
+            background: #007bff;
+            color: white;
+        }
+        
+        .section-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 1rem;
+            margin-bottom: 15px;
         }
-        .scanner-header h3 {
-            margin: 0;
-            font-size: 1.125rem;
-            font-weight: 600;
-            text-transform: capitalize;
-        }
-        .btn {
-            background-color: #3b82f6;
-            color: white;
-            padding: 0.5rem 1rem;
-            border: none;
-            border-radius: 6px;
-            font-weight: 500;
-            cursor: pointer;
-            font-size: 0.875rem;
-            text-decoration: none;
-            display: inline-block;
-        }
-        .btn-outline {
-            background-color: transparent;
-            color: #374151;
-            border: 1px solid #d1d5db;
-        }
-        .btn-small {
-            padding: 0.25rem 0.5rem;
-            font-size: 0.75rem;
-        }
-        .package-section h4 {
-            font-weight: 600;
-            margin: 0 0 0.75rem 0;
-        }
-        .package-list {
-            max-height: 24rem;
-            overflow-y: auto;
-        }
-        .package-item {
-            padding: 0.75rem;
-            border-radius: 6px;
-            margin-bottom: 0.5rem;
-            border: 1px solid;
-        }
-        .exact-match {
-            background-color: #f0fdf4;
-            border-color: #bbf7d0;
-        }
-        .fuzzy-match {
-            background-color: #fefce8;
-            border-color: #fef08a;
-        }
-        .unique-package {
-            background-color: #eff6ff;
-            border-color: #bfdbfe;
-        }
-        .package-name {
-            font-weight: 500;
-            font-size: 0.875rem;
-        }
-        .package-details {
-            font-size: 0.75rem;
-            color: #6b7280;
-            margin-top: 0.25rem;
-        }
-        .badge {
-            display: inline-block;
-            padding: 0.125rem 0.375rem;
-            border-radius: 4px;
-            font-size: 0.625rem;
-            font-weight: 500;
-            margin: 0.25rem 0.25rem 0 0;
-        }
-        .badge-exact { background-color: #dcfce7; color: #166534; }
-        .badge-fuzzy { background-color: #fef3c7; color: #d97706; }
-        .badge-scanner { background-color: #e5e7eb; color: #374151; }
-        .match-scores {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 0.25rem;
-            margin-top: 0.5rem;
-            font-size: 0.625rem;
-        }
-        .loading {
-            text-align: center;
-            padding: 2rem;
-        }
-        .error {
-            color: #dc2626;
-            text-align: center;
-            padding: 2rem;
-        }
-        .hidden { display: none; }
+        
         .tech-stack {
             display: flex;
             flex-wrap: wrap;
-            gap: 0.5rem;
+            gap: 8px;
         }
+        
         .tech-badge {
-            background-color: #f3f4f6;
-            color: #374151;
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
-            font-size: 0.75rem;
-        }
-        .duplicate-info {
-            margin: 0.5rem 0;
-            padding: 0.5rem;
-            background: rgba(251, 191, 36, 0.1);
-            border: 1px solid rgba(251, 191, 36, 0.3);
-            border-radius: 4px;
-            font-size: 0.75rem;
-        }
-        .duplicate-info-warning {
-            color: #d97706;
-            font-weight: 500;
-            margin-bottom: 0.25rem;
-        }
-        .duplicate-counts {
-            color: #6b7280;
-            display: flex;
-            gap: 1rem;
-            flex-wrap: wrap;
-        }
-        @media (max-width: 768px) {
-            .grid-cols-3 { grid-template-columns: 1fr; }
-            .grid-cols-2 { grid-template-columns: 1fr; }
-            .scanner-header { flex-direction: column; align-items: stretch; }
-            .scanner-header .btn { margin-top: 0.5rem; }
+            background: #f0f0f0;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            color: #555;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>Scan Analysis</h1>
-            <a href="/static/repository-scanner.html" class="btn btn-outline">← Back to Repository Scanner</a>
+        <div style="margin-bottom: 20px;">
+            <a href="/static/repository-scanner.html" class="btn btn-outline">← Back</a>
         </div>
 
-        <div id="loading" class="loading">
-            <p>Loading analysis...</p>
-        </div>
+        <h1>Package Analysis</h1>
 
-        <div id="error" class="error hidden">
-            <p>No analysis available</p>
-        </div>
+        <div id="loading" class="loading">Loading analysis...</div>
+        <div id="error" class="error hidden"></div>
 
         <div id="content" class="hidden">
-            <!-- Package Comparison Overview -->
+            <!-- Overview Stats -->
             <div class="card">
-                <div class="card-header">
-                    <h2>Package Comparison Overview</h2>
-                    <p>Total packages found by each scanner</p>
+                <h2>Scanner Overview</h2>
+                <div class="stats-grid" id="stats"></div>
+            </div>
+
+            <!-- Exact Matches -->
+            <div class="card" id="exactCard">
+                <div class="section-header">
+                    <h2>Exact Matches <span id="exactCount" style="color: #28a745;"></span></h2>
+                    <span style="font-size: 12px; color: #666;">Packages with identical name and version across scanners</span>
                 </div>
-                <div class="grid grid-cols-3" id="overview">
-                    <!-- Will be populated by JavaScript -->
+                <div style="overflow-x: auto;">
+                    <table id="exactTable">
+                        <thead>
+                            <tr>
+                                <th>Package Name</th>
+                                <th>Version</th>
+                                <th>Found In</th>
+                                <th>Duplicates</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
                 </div>
             </div>
 
-            <!-- Scanner Analysis Sections -->
-            <div id="scannerSections">
-                <!-- Will be populated by JavaScript -->
+            <!-- Fuzzy Matches -->
+            <div class="card" id="fuzzyCard">
+                <div class="section-header">
+                    <h2>Fuzzy Matches <span id="fuzzyCount" style="color: #ffc107;"></span></h2>
+                    <span style="font-size: 12px; color: #666;">Similar packages with high confidence matching</span>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table id="fuzzyTable">
+                        <thead>
+                            <tr>
+                                <th>Package</th>
+                                <th>Similar To</th>
+                                <th>Scanners</th>
+                                <th>Similarity</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Unique Packages -->
+            <div class="card" id="uniqueCard">
+                <div class="section-header">
+                    <h2>Scanner-Specific Packages</h2>
+                    <span style="font-size: 12px; color: #666;">Packages found only by one scanner</span>
+                </div>
+                <div id="uniqueContent"></div>
             </div>
 
             <!-- Tech Stack -->
-            <div class="card" id="techStackCard">
-                <div class="card-header">
-                    <h2>Detected Tech Stack</h2>
-                </div>
-                <div class="tech-stack" id="techStack">
-                    <!-- Will be populated by JavaScript -->
-                </div>
+            <div class="card" id="techCard" class="hidden">
+                <h2>Detected Technologies</h2>
+                <div class="tech-stack" id="techStack"></div>
             </div>
         </div>
     </div>
 
     <script>
         const API_BASE_URL = '/api/v1';
-        
-        // Get scan ID from URL parameters
         const urlParams = new URLSearchParams(window.location.search);
         const scanId = urlParams.get('scanId');
 
         if (!scanId) {
-            document.getElementById('loading').classList.add('hidden');
-            document.getElementById('error').classList.remove('hidden');
-            document.getElementById('error').innerHTML = '<p>No scan ID provided</p>';
+            showError('No scan ID provided');
         } else {
             loadAnalysis();
         }
 
         async function loadAnalysis() {
             try {
-                // Fetch from API directly (no localStorage caching to avoid quota issues)
                 const response = await fetch(`${API_BASE_URL}/scan/scan-analysis/${scanId}`);
+                if (!response.ok) throw new Error('Failed to fetch');
                 
-                if (!response.ok) {
-                    throw new Error('Failed to fetch analysis');
-                }
+                const data = await response.json();
+                displayAnalysis(data);
                 
-                const analysis = await response.json();
-                
-                displayAnalysis(analysis);
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('content').classList.remove('hidden');
-                
             } catch (error) {
-                console.error('Failed to fetch analysis:', error);
-                document.getElementById('loading').classList.add('hidden');
-                document.getElementById('error').classList.remove('hidden');
-                document.getElementById('error').innerHTML = '<p>Failed to load analysis data</p>';
+                showError('Failed to load analysis: ' + error.message);
             }
         }
 
-        function displayAnalysis(analysis) {
-            // Display overview
-            displayOverview(analysis);
-            
-            // Display scanner sections
-            displayScannerSections(analysis);
-            
-            // Display tech stack
-            displayTechStack(analysis);
+        function displayAnalysis(data) {
+            displayStats(data.total_counts || {});
+            displayExactMatches(data.common_packages?.exact || []);
+            displayFuzzyMatches(data.fuzzy_matches?.fuzzy || []);
+            displayUnique(data.unique_packages || {});
+            displayTechStack(data.tech_stack || []);
         }
 
-        function displayOverview(analysis) {
-            const overview = document.getElementById('overview');
-            const totalCounts = analysis.total_counts || {};
-            
-            overview.innerHTML = Object.entries(totalCounts).map(([scanner, count]) => `
-                <div class="overview-box">
-                    <h3>${scanner}</h3>
-                    <p class="number">${count}</p>
-                    <p class="label">total packages</p>
+        function displayStats(counts) {
+            const stats = document.getElementById('stats');
+            stats.innerHTML = Object.entries(counts).map(([scanner, count]) => `
+                <div class="stat-box">
+                    <div class="label">${scanner}</div>
+                    <div class="value">${count.toLocaleString()}</div>
+                    <div class="sublabel">total packages</div>
                 </div>
             `).join('');
         }
 
-        function displayScannerSections(analysis) {
-            const scannerSections = document.getElementById('scannerSections');
-            const scanners = ['trivy', 'syft', 'cdxgen'];
+        function displayExactMatches(matches) {
+            const count = document.getElementById('exactCount');
+            const tbody = document.querySelector('#exactTable tbody');
             
-            scannerSections.innerHTML = scanners.map(scanner => {
-                const matching = getMatchingPackages(analysis, scanner);
-                const unique = getUniquePackages(analysis, scanner);
+            count.textContent = `(${matches.length})`;
+            
+            if (matches.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#999;">No exact matches found</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = matches.map(pkg => {
+                const scanners = (pkg.found_in || []).map(s => 
+                    `<span class="badge badge-scanner">${s}</span>`
+                ).join('');
+                
+                const duplicates = pkg.duplicate_counts ? 
+                    Object.entries(pkg.duplicate_counts)
+                        .filter(([s, c]) => c > 1)
+                        .map(([s, c]) => `<span class="badge badge-duplicate">${s}: ${c}x</span>`)
+                        .join('') || '<span style="color:#999;font-size:11px;">None</span>'
+                    : '<span style="color:#999;font-size:11px;">-</span>';
                 
                 return `
-                    <div class="scanner-section">
-                        <div class="scanner-header">
-                            <div>
-                                <h3>${scanner} Analysis</h3>
-                                <p style="color: #6b7280; font-size: 0.875rem;">Matching and unique packages found by ${scanner}</p>
+                    <tr>
+                        <td><span class="pkg-name">${pkg.name}</span></td>
+                        <td><span class="pkg-version">${pkg.version || '-'}</span></td>
+                        <td>${scanners}</td>
+                        <td>${duplicates}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function displayFuzzyMatches(matches) {
+            const count = document.getElementById('fuzzyCount');
+            const tbody = document.querySelector('#fuzzyTable tbody');
+            
+            count.textContent = `(${matches.length})`;
+            
+            if (matches.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#999;">No fuzzy matches found</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = matches.map(pkg => {
+                const scores = pkg.similarity_scores || {};
+                const similarTo = pkg.similar_to || {};
+                
+                return `
+                    <tr>
+                        <td>
+                            <span class="pkg-name">${pkg.name}</span>
+                            <span class="pkg-version">${pkg.version || ''}</span>
+                            <br>
+                            <span class="badge badge-scanner">${pkg.scanner}</span>
+                        </td>
+                        <td>
+                            <span class="pkg-name">${similarTo.name || '-'}</span>
+                            <span class="pkg-version">${similarTo.version || ''}</span>
+                            <br>
+                            <span class="badge badge-scanner">${similarTo.scanner || '-'}</span>
+                        </td>
+                        <td>
+                            <span class="badge badge-scanner">${pkg.scanner}</span>
+                            <span class="badge badge-scanner">${similarTo.scanner}</span>
+                        </td>
+                        <td>
+                            <div class="similarity">
+                                Overall: <strong>${Math.round((scores.overall || 0) * 100)}%</strong><br>
+                                Name: ${Math.round((scores.name || 0) * 100)}% | 
+                                Ver: ${Math.round((scores.version || 0) * 100)}%
                             </div>
-                            <button class="btn btn-outline btn-small" onclick="viewGraph('${scanner}')">
-                                📊 View Graph
-                            </button>
-                        </div>
-                        
-                        <div class="grid grid-cols-2">
-                            <!-- Matching Packages -->
-                            <div class="package-section">
-                                <h4>Matching Packages</h4>
-                                <div class="package-list">
-                                    ${displayMatchingPackages(matching)}
-                                </div>
-                            </div>
-                            
-                            <!-- Unique Packages -->
-                            <div class="package-section">
-                                <h4>Unique Packages (${unique.length})</h4>
-                                <div class="package-list">
-                                    ${displayUniquePackages(unique)}
-                                </div>
-                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function displayUnique(unique) {
+            const content = document.getElementById('uniqueContent');
+            const scanners = Object.keys(unique);
+            
+            if (scanners.length === 0) {
+                content.innerHTML = '<p style="color:#999;">No unique packages found</p>';
+                return;
+            }
+            
+            content.innerHTML = scanners.map(scanner => {
+                const packages = unique[scanner] || [];
+                return `
+                    <div style="margin-bottom: 20px;">
+                        <h3 style="font-size: 14px; margin-bottom: 10px; color: #555;">
+                            ${scanner.toUpperCase()} 
+                            <span style="color: #999; font-weight: normal;">(${packages.length} unique)</span>
+                        </h3>
+                        <div style="max-height: 200px; overflow-y: auto; font-size: 12px;">
+                            ${packages.length === 0 ? 
+                                '<p style="color:#999;">None</p>' :
+                                packages.map(p => 
+                                    `<div style="padding: 5px; border-bottom: 1px solid #f0f0f0;">
+                                        <span class="pkg-name">${p.name}</span> 
+                                        <span class="pkg-version">${p.version || ''}</span>
+                                    </div>`
+                                ).join('')
+                            }
                         </div>
                     </div>
                 `;
             }).join('');
         }
 
-        function getMatchingPackages(analysis, scanner) {
-            const exact = (analysis.common_packages?.exact || []).filter(pkg => 
-                pkg.found_in && pkg.found_in.includes(scanner)
-            );
-            const fuzzy = (analysis.common_packages?.fuzzy || []).filter(pkg => 
-                pkg.found_in && pkg.found_in.includes(scanner)
-            );
-            return { exact, fuzzy };
-        }
-
-        function getUniquePackages(analysis, scanner) {
-            return analysis.unique_packages?.[scanner] || [];
-        }
-
-        function displayMatchingPackages(matching) {
-            const { exact, fuzzy } = matching;
+        function displayTechStack(tech) {
+            const card = document.getElementById('techCard');
+            const stack = document.getElementById('techStack');
             
-            if (exact.length === 0 && fuzzy.length === 0) {
-                return '<p style="color: #6b7280; font-size: 0.875rem;">No matching packages</p>';
-            }
-            
-            let html = '';
-            
-            // Exact matches
-            html += exact.map(pkg => `
-                <div class="package-item exact-match">
-                    <div class="package-name">${pkg.name} ${pkg.version || ''}</div>
-                    ${pkg.purl ? `<div class="package-details">PURL: ${pkg.purl}</div>` : ''}
-                    ${pkg.cpe ? `<div class="package-details">CPE: ${pkg.cpe}</div>` : ''}
-                    ${pkg.has_duplicates ? generateDuplicateInfo(pkg.duplicate_counts) : ''}
-                    <div>
-                        <span class="badge badge-exact">Exact Match</span>
-                        ${(pkg.found_in || []).map(s => `<span class="badge badge-scanner">${s}</span>`).join('')}
-                    </div>
-                    <div class="match-scores">
-                        <div>Name: 100%</div>
-                        <div>Version: 100%</div>
-                        <div>PURL: 100%</div>
-                        <div>CPE: 100%</div>
-                    </div>
-                </div>
-            `).join('');
-            
-            // Fuzzy matches
-            html += fuzzy.map(pkg => `
-                <div class="package-item fuzzy-match">
-                    <div class="package-name">${pkg.name} ${pkg.version || ''}</div>
-                    ${pkg.purl ? `<div class="package-details">PURL: ${pkg.purl}</div>` : ''}
-                    ${pkg.cpe ? `<div class="package-details">CPE: ${pkg.cpe}</div>` : ''}
-                    ${pkg.has_duplicates ? generateDuplicateInfo(pkg.duplicate_counts) : ''}
-                    ${pkg.similar_to ? `
-                        <div style="margin-top: 0.5rem; padding: 0.5rem; background: rgba(255,255,255,0.5); border-radius: 4px; border: 1px solid #e5e7eb;">
-                            <div style="font-size: 0.625rem; font-weight: 500; margin-bottom: 0.25rem;">Similar to:</div>
-                            <div style="font-size: 0.625rem;">${pkg.similar_to.name} ${pkg.similar_to.version || ''}</div>
-                            ${pkg.similar_to.purl ? `<div style="font-size: 0.625rem; color: #6b7280;">PURL: ${pkg.similar_to.purl}</div>` : ''}
-                            ${pkg.similar_to.cpe ? `<div style="font-size: 0.625rem; color: #6b7280;">CPE: ${pkg.similar_to.cpe}</div>` : ''}
-                        </div>
-                    ` : ''}
-                    <div>
-                        <span class="badge badge-fuzzy">${pkg.match_type || 'Fuzzy Match'}</span>
-                        ${(pkg.found_in || []).map(s => `<span class="badge badge-scanner">${s}</span>`).join('')}
-                    </div>
-                    ${pkg.match_scores ? `
-                        <div class="match-scores">
-                            <div>Name: ${Math.round((pkg.match_scores.name || 0) * 100)}%</div>
-                            <div>Version: ${Math.round((pkg.match_scores.version || 0) * 100)}%</div>
-                            <div>PURL: ${Math.round((pkg.match_scores.purl || 0) * 100)}%</div>
-                            <div>CPE: ${Math.round((pkg.match_scores.cpe || 0) * 100)}%</div>
-                        </div>
-                    ` : ''}
-                </div>
-            `).join('');
-            
-            return html;
-        }
-
-        function displayUniquePackages(packages) {
-            if (packages.length === 0) {
-                return '<p style="color: #6b7280; font-size: 0.875rem;">No unique packages</p>';
-            }
-            
-            return packages.map(pkg => `
-                <div class="package-item unique-package">
-                    <div class="package-name">${pkg.name} ${pkg.version || ''}</div>
-                    ${pkg.purl ? `<div class="package-details">PURL: ${pkg.purl}</div>` : ''}
-                    ${pkg.cpe ? `<div class="package-details">CPE: ${pkg.cpe}</div>` : ''}
-                </div>
-            `).join('');
-        }
-
-        function displayTechStack(analysis) {
-            const techStack = document.getElementById('techStack');
-            const techStackList = analysis.tech_stack || [];
-            
-            if (techStackList.length === 0) {
-                techStack.innerHTML = '<p style="color: #6b7280;">No tech stack detected</p>';
+            if (tech.length === 0) {
+                card.classList.add('hidden');
                 return;
             }
             
-            techStack.innerHTML = techStackList.map(tech => 
-                `<span class="tech-badge">${tech}</span>`
-            ).join('');
+            card.classList.remove('hidden');
+            stack.innerHTML = tech.map(t => `<span class="tech-badge">${t}</span>`).join('');
         }
 
-        function generateDuplicateInfo(duplicateCounts) {
-            if (!duplicateCounts || Object.keys(duplicateCounts).length === 0) {
-                return '';
-            }
-            
-            const hasDuplicates = Object.values(duplicateCounts).some(count => count > 1);
-            if (!hasDuplicates) {
-                return '';
-            }
-            
-            const duplicateList = Object.entries(duplicateCounts)
-                .filter(([scanner, count]) => count > 1)
-                .map(([scanner, count]) => `${scanner}: ${count} duplicates`)
-                .join(', ');
-            
-            return `
-                <div class="duplicate-info">
-                    <div class="duplicate-info-warning">⚠️ Duplicate Detection</div>
-                    <div class="duplicate-counts">Component found multiple times: ${duplicateList}</div>
-                </div>
-            `;
-        }
-
-        function viewGraph(scanner) {
-            window.location.href = `/static/graph.html?scanId=${scanId}&scanner=${scanner}`;
+        function showError(msg) {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('error').textContent = msg;
+            document.getElementById('error').classList.remove('hidden');
         }
     </script>
 </body>

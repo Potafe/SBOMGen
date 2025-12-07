@@ -21,9 +21,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "./logs/sbom_generator.log"
 
-    TRIVY_TIMEOUT: int = 3000
-    SYFT_TIMEOUT: int = 3000
-    CDXGEN_TIMEOUT: int = 3000
+    TRIVY_TIMEOUT: int = 5000
+    SYFT_TIMEOUT: int = 5000
+    CDXGEN_TIMEOUT: int = 5000
+    GHAS_TIMEOUT: int = 30  # GitHub API timeout in seconds
     CYCLONEDX_CONVERT_TIMEOUT: int = 100
 
     class Config:

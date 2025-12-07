@@ -19,6 +19,7 @@ from app.schemas.scan import (
 from app.core.config import settings
 from app.utils.tech_stack import detect_tech_stack
 from app.services.package_analyze import PackageAnalyze
+from app.services.github_service import GithubService
 from app.services.database_service import db_service
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ class SBOMService:
     def __init__(self):
         self.docker_client = docker.from_env()
         self.package_analyzer = PackageAnalyze()
+        self.github_service = GithubService()
 
     async def start_scan(self, repo_url: str, github_token: Optional[str] = None) -> str:
         scan_id = str(uuid.uuid4())
@@ -64,16 +66,36 @@ class SBOMService:
             trivy_result = await self._run_scanner(scan_id, ScannerType.TRIVY, repo_path)
             syft_result = await self._run_scanner(scan_id, ScannerType.SYFT, repo_path)
             cdxgen_result = await self._run_scanner(scan_id, ScannerType.CDXGEN, repo_path)
+            ghas_result = await self._run_scanner(scan_id, ScannerType.GHAS, repo_path, github_token, scan.repo_url)
 
             scan.trivy_sbom = trivy_result
             scan.syft_sbom = syft_result
             scan.cdxgen_sbom = cdxgen_result
+            scan.ghas_sbom = ghas_result
             scan.status = ScanStatus.COMPLETED
             scan.completed_at = datetime.now()
             logger.info(f"Scan {scan_id} completed successfully")
             
             # Save updated scan results
             await db_service.save_scan_results(scan)
+            
+            # Extract and save packages for each scanner immediately
+            logger.info(f"Extracting and saving packages for scan {scan_id}")
+            if trivy_result and trivy_result.sbom:
+                trivy_packages = self.package_analyzer.extract_packages(trivy_result.sbom, ScannerType.TRIVY)
+                await db_service.save_packages(scan_id, ScannerType.TRIVY.value, trivy_packages)
+            
+            if syft_result and syft_result.sbom:
+                syft_packages = self.package_analyzer.extract_packages(syft_result.sbom, ScannerType.SYFT)
+                await db_service.save_packages(scan_id, ScannerType.SYFT.value, syft_packages)
+            
+            if cdxgen_result and cdxgen_result.sbom:
+                cdxgen_packages = self.package_analyzer.extract_packages(cdxgen_result.sbom, ScannerType.CDXGEN)
+                await db_service.save_packages(scan_id, ScannerType.CDXGEN.value, cdxgen_packages)
+
+            if ghas_result and ghas_result.sbom:
+                ghas_packages = self.package_analyzer.extract_spdx_packages(ghas_result.sbom, ScannerType.GHAS)
+                await db_service.save_packages(scan_id, ScannerType.GHAS.value, ghas_packages)
 
             # await self._handle_reruns(scan_id)
         except Exception as e:
@@ -82,7 +104,14 @@ class SBOMService:
             logger.error(f"Scan {scan_id} failed: {e}")
             print(f"Scan failed: {e}")
 
-    async def _run_scanner(self, scan_id: str, scanner: ScannerType, repo_path: str) -> SBOMResult:
+    async def _run_scanner(
+        self, 
+        scan_id: str, 
+        scanner: ScannerType, 
+        repo_path: str = None,
+        github_token: Optional[str] = None,
+        repo_url: Optional[str] = None
+    ) -> SBOMResult:
         logger.info(f"Running {scanner.value} for scan {scan_id}")
         try:
             if scanner == ScannerType.TRIVY:
@@ -136,6 +165,38 @@ class SBOMService:
                 
                 os.unlink(temp_file_path)
 
+            elif scanner == ScannerType.GHAS:
+                if not repo_url:
+                    raise Exception("repo_url is required for GHAS scanner")
+                
+                # Fetch SBOM from GitHub API
+                sbom_data = await self.github_service.fetch_dependency_graph_sbom(
+                    repo_url=repo_url,
+                    github_token=github_token
+                )
+                
+                # GitHub returns SPDX format with nested sbom structure
+                if "sbom" in sbom_data:
+                    actual_sbom = sbom_data["sbom"]
+                else:
+                    actual_sbom = sbom_data
+                
+                # Save to temp file for consistency with other scanners
+                with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as temp_file:
+                    temp_file_path = temp_file.name
+                    json.dump(actual_sbom, temp_file, indent=2)
+                
+                # Verify file was written correctly
+                with open(temp_file_path, 'r') as f:
+                    sbom_data = json.load(f)
+                
+                component_count = len(sbom_data.get("packages", []))
+                
+                # Clean up temp file
+                os.unlink(temp_file_path)
+            else:
+                raise Exception(f"Unknown scanner type: {scanner.value}")
+
             logger.info(f"{scanner.value} for scan {scan_id} found {component_count} components")
             return SBOMResult(scanner=scanner, sbom=sbom_data, component_count=component_count)
             
@@ -165,6 +226,8 @@ class SBOMService:
                 return scan.syft_sbom.sbom if scan.syft_sbom else None
             elif scanner == ScannerType.CDXGEN:
                 return scan.cdxgen_sbom.sbom if scan.cdxgen_sbom else None
+            elif scanner == ScannerType.GHAS:
+                return scan.ghas_sbom.sbom if scan.ghas_sbom else None
             elif scanner == ScannerType.UPLOADED:
                 return scan.uploaded_sbom.sbom if scan.uploaded_sbom else None
         
@@ -176,14 +239,21 @@ class SBOMService:
         return None
     
     async def get_scan_analysis(self, scan_id: str) -> Dict:
-        """Get analysis data for a scan."""
+        """
+        Get analysis data for a scan.
+        Now uses SQL-based analysis from DatabaseService for optimal performance.
+        """
         try:
+            # Check if this is an uploaded scan
             uploaded_results = await self.get_uploaded_scan_results(scan_id)
             if uploaded_results and uploaded_results.uploaded_sbom:
                 logger.info(f"Getting analysis for uploaded scan {scan_id}")
                 sbom_data = uploaded_results.uploaded_sbom.sbom
                 if sbom_data:
-                    pkg_list = self.package_analyzer._extract_packages(sbom_data, ScannerType.UPLOADED)
+                    # Extract and save packages if not already done
+                    pkg_list = self.package_analyzer.extract_packages(sbom_data, ScannerType.UPLOADED)
+                    await db_service.save_packages(scan_id, ScannerType.UPLOADED.value, pkg_list)
+                    
                     return {
                         "packages": pkg_list,
                         "total_count": len(pkg_list),
@@ -192,35 +262,19 @@ class SBOMService:
                         "original_format": uploaded_results.original_format,
                         "component_count": uploaded_results.uploaded_sbom.component_count
                     }
-                
+            
+            # Use SQL-based analysis for repository scans
             results = await self.get_scan_results(scan_id)
             if not results:
-                return {}
+                return {"error": "Scan not found"}
             
-            packages = []
-            total_counts = {}
-            for scanner in [ScannerType.TRIVY, ScannerType.SYFT, ScannerType.CDXGEN]:
-                sbom_data = await self.get_scanner_sbom(scan_id, scanner)
-                if sbom_data:
-                    pkg_list = self.package_analyzer._extract_packages(sbom_data, scanner)
-                    packages.append(pkg_list)
-                    total_counts[scanner.value] = len(pkg_list)
-                else:
-                    packages.append([])
-                    total_counts[scanner.value] = 0
+            # Get comprehensive analysis from database
+            analysis = await db_service.analyze_scan_packages(scan_id)
             
-            common = self.package_analyzer._find_common_packages(packages)
-            unique = self.package_analyzer._find_unique_packages(packages)
+            # Add tech stack info
+            analysis["tech_stack"] = results.tech_stack
             
-            scores = self.package_analyzer._calculate_scores(common, unique, total_counts)
-            
-            return {
-                "common_packages": common,
-                "unique_packages": unique,
-                "total_counts": total_counts,
-                "scores": scores,
-                "tech_stack": results.tech_stack
-            }
+            return analysis
         except Exception as e:
             logger.error(f"Error in get_scan_analysis for scan {scan_id}: {e}")
             return {"error": "Analysis failed", "details": str(e)}
@@ -231,7 +285,7 @@ class SBOMService:
         if not sbom_data:
             return {"error": "SBOM not found for this scanner"}
         
-        return self.package_analyzer._parse_sbom_graph(sbom_data)
+        return self.package_analyzer.parse_sbom_graph(sbom_data)
     
     async def process_uploaded_sbom(self, filename: str, file_content: bytes, sbom_format: str) -> str:
         """Process an uploaded SBOM file and return scan_id."""
@@ -307,6 +361,11 @@ class SBOMService:
             
             # Save updated uploaded scan results
             await db_service.save_uploaded_scan_results(uploaded_scan)
+            
+            # Extract and save packages
+            logger.info(f"Extracting and saving packages from uploaded SBOM for scan {scan_id}")
+            uploaded_packages = self.package_analyzer.extract_packages(sbom_data, ScannerType.UPLOADED)
+            await db_service.save_packages(scan_id, ScannerType.UPLOADED.value, uploaded_packages)
             
             logger.info(f"Successfully processed uploaded SBOM for scan {scan_id}")
             return scan_id

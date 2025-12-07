@@ -1,19 +1,25 @@
-"""
-Database configuration and session management
-"""
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from sqlalchemy import text
 from app.database.models import Base
 import os
+from dotenv import load_dotenv
 
-# Database URL - SQLite with async support
-DATABASE_URL = "sqlite+aiosqlite:///./sbomgen.db"
+load_dotenv()
 
-# Create async engine
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", 
+    "postgresql+psycopg://postgres:password@localhost:5432/sbomgen"
+)
+
+# Create async engine with psycopg3
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,  # Set to True for SQL debugging
-    future=True
+    future=True,
+    pool_pre_ping=True,  # Verify connections before using them
+    pool_size=5,  # Number of connections to maintain
+    max_overflow=10  # Maximum number of connections to create beyond pool_size
 )
 
 # Create session factory
@@ -31,8 +37,26 @@ async def init_db():
     try:
         logger.info("Initializing database tables...")
         async with engine.begin() as conn:
+            # Enable required PostgreSQL extensions
+            # pg_trgm: Fast trigram-based similarity for filtering
+            # fuzzystrmatch: Provides levenshtein() for accurate distance calculation
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS fuzzystrmatch"))
+            logger.info("PostgreSQL extensions enabled (pg_trgm, fuzzystrmatch)")
+            
+            # Create all tables
             await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables created successfully")
+            
+            # Create GIN indexes for fuzzy search on package name and version
+            await conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_packages_name_trgm 
+                ON packages USING gin (name gin_trgm_ops)
+            """))
+            await conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_packages_version_trgm 
+                ON packages USING gin (version gin_trgm_ops)
+            """))
+            logger.info("Database tables and indexes created successfully")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         import traceback
@@ -46,3 +70,7 @@ async def get_db_session():
             yield session
         finally:
             await session.close()
+
+async def close_db():
+    """Close database connections"""
+    await engine.dispose()

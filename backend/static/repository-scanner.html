@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SBOM Generator</title>
+    <title>SBOM Collaborator</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -163,7 +163,7 @@
     <div class="container">
         <div class="header">
             <h1>SBOM Generator</h1>
-            <p>Upload a GitHub repository to generate Software Bill of Materials</p>
+            <p>Upload a GitHub repository to generate Software Bill of Materials from various scanners</p>
             <div style="margin-top: 1rem;">
                 <a href="/static/upload-sbom.html" class="btn btn-outline" style="width: auto; margin-right: 0.5rem;">
                     📄 Submit SBOM File to Visualize
@@ -430,6 +430,10 @@
         function displayScanResults() {
             if (!currentScanResults) return;
             
+            // Debug: Log scan results to console
+            console.log('Scan Results:', currentScanResults);
+            console.log('GHAS SBOM:', currentScanResults.ghas_sbom);
+            
             analysisCard.classList.remove('hidden');
             resultsCard.classList.remove('hidden');
             
@@ -463,29 +467,47 @@
             const scanners = [
                 { name: 'trivy', result: currentScanResults.trivy_sbom },
                 { name: 'syft', result: currentScanResults.syft_sbom },
-                { name: 'cdxgen', result: currentScanResults.cdxgen_sbom }
+                { name: 'cdxgen', result: currentScanResults.cdxgen_sbom },
+                { name: 'ghas', result: currentScanResults.ghas_sbom, label: 'GitHub Advanced Security' }
             ];
             
-            return scanners.map(scanner => `
-                <div class="scanner-result">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap;">
-                        <h3>${scanner.name}</h3>
-                        <div class="btn-group">
-                            <button class="btn btn-outline btn-small" onclick="downloadSBOM('${scanner.name}')">
-                                📥 Download
-                            </button>
-                            <button class="btn btn-outline btn-small" onclick="viewGraph('${scanner.name}')">
-                                📊 Graph
-                            </button>
+            // Debug each scanner with more details
+            console.log('=== generateScannerResults Debug ===');
+            console.log('Full currentScanResults:', currentScanResults);
+            scanners.forEach(s => {
+                console.log(`Scanner ${s.name}:`, s.result);
+                console.log(`  - is null: ${s.result === null}`);
+                console.log(`  - is undefined: ${s.result === undefined}`);
+                console.log(`  - typeof: ${typeof s.result}`);
+                console.log(`  - has component_count: ${s.result?.component_count}`);
+            });
+            
+            return scanners
+                .filter(scanner => {
+                    const hasResult = scanner.result !== null && scanner.result !== undefined;
+                    console.log(`${scanner.name} hasResult:`, hasResult, 'result:', scanner.result);
+                    return hasResult;
+                })
+                .map(scanner => `
+                    <div class="scanner-result">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap;">
+                            <h3>${scanner.label || scanner.name}</h3>
+                            <div class="btn-group">
+                                <button class="btn btn-outline btn-small" onclick="downloadSBOM('${scanner.name}')">
+                                    📥 Download
+                                </button>
+                                <button class="btn btn-outline btn-small" onclick="viewGraph('${scanner.name}')">
+                                    📊 Graph
+                                </button>
+                            </div>
+                        </div>
+                        <div class="scanner-stats">
+                            <span>Components: <strong>${scanner.result?.component_count || 0}</strong></span>
+                            <span>Status: ${scanner.result?.error ? 'Failed' : 'Success'}</span>
+                            ${scanner.result?.error ? `<span style="color: #dc2626;">Error: ${scanner.result.error}</span>` : ''}
                         </div>
                     </div>
-                    <div class="scanner-stats">
-                        <span>Components: <strong>${scanner.result?.component_count || 0}</strong></span>
-                        <span>Status: ${scanner.result?.error ? 'Failed' : 'Success'}</span>
-                        ${scanner.result?.error ? `<span style="color: #dc2626;">Error: ${scanner.result.error}</span>` : ''}
-                    </div>
-                </div>
-            `).join('');
+                `).join('');
         }
 
         function downloadSBOM(scanner) {
