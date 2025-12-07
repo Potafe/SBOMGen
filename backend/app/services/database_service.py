@@ -60,6 +60,15 @@ class DatabaseService:
                         "error": scan_results.ghas_sbom.error
                     }
                 
+                bd_sbom_json = None
+                if scan_results.bd_sbom:
+                    bd_sbom_json = {
+                        "scanner": scan_results.bd_sbom.scanner.value,
+                        "sbom": scan_results.bd_sbom.sbom,
+                        "component_count": scan_results.bd_sbom.component_count,
+                        "error": scan_results.bd_sbom.error
+                    }
+                
                 uploaded_sbom_json = None
                 if scan_results.uploaded_sbom:
                     uploaded_sbom_json = {
@@ -78,6 +87,7 @@ class DatabaseService:
                     syft_sbom=syft_sbom_json,
                     cdxgen_sbom=cdxgen_sbom_json,
                     ghas_sbom=ghas_sbom_json,
+                    bd_sbom=bd_sbom_json,
                     uploaded_sbom=uploaded_sbom_json,
                     created_at=scan_results.created_at,
                     completed_at=scan_results.completed_at
@@ -98,6 +108,7 @@ class DatabaseService:
                     existing_scan.syft_sbom = syft_sbom_json
                     existing_scan.cdxgen_sbom = cdxgen_sbom_json
                     existing_scan.ghas_sbom = ghas_sbom_json
+                    existing_scan.bd_sbom = bd_sbom_json
                     existing_scan.uploaded_sbom = uploaded_sbom_json
                     existing_scan.completed_at = scan_results.completed_at
                 else:
@@ -167,6 +178,14 @@ class DatabaseService:
                         sbom=db_scan.ghas_sbom["sbom"],
                         component_count=db_scan.ghas_sbom["component_count"],
                         error=db_scan.ghas_sbom["error"]
+                    )
+                
+                if db_scan.bd_sbom:
+                    scan_results.bd_sbom = SBOMResult(
+                        scanner=ScannerType(db_scan.bd_sbom["scanner"]),
+                        sbom=db_scan.bd_sbom["sbom"],
+                        component_count=db_scan.bd_sbom["component_count"],
+                        error=db_scan.bd_sbom["error"]
                     )
                 
                 if db_scan.uploaded_sbom:

@@ -193,6 +193,28 @@
                     <small>Required for private repositories. Create a PAT with repo access.</small>
                 </div>
                 
+                <div style="margin: 1.5rem 0; padding-top: 1.5rem; border-top: 1px solid #e5e7eb;">
+                    <h3 style="font-size: 1rem; margin-bottom: 1rem; color: #374151;">Black Duck Integration (Optional)</h3>
+                    
+                    <div class="form-group">
+                        <label for="bd_project_name">Black Duck Project Name</label>
+                        <input type="text" id="bd_project_name" placeholder="MyProject">
+                        <small>Name of the project in Black Duck</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="bd_project_version">Black Duck Project Version</label>
+                        <input type="text" id="bd_project_version" placeholder="1.0.0">
+                        <small>Version name of the project in Black Duck</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="bd_api_token">Black Duck API Token</label>
+                        <input type="password" id="bd_api_token" placeholder="Enter API token">
+                        <small>Black Duck API token for authentication</small>
+                    </div>
+                </div>
+                
                 <div class="error" id="upload_error"></div>
                 
                 <button type="submit" class="btn" id="uploadBtn">Upload Repository</button>
@@ -297,6 +319,9 @@
             
             const repoUrl = document.getElementById('repo_url').value;
             const githubToken = document.getElementById('github_token').value;
+            const bdProjectName = document.getElementById('bd_project_name').value;
+            const bdProjectVersion = document.getElementById('bd_project_version').value;
+            const bdApiToken = document.getElementById('bd_api_token').value;
             
             // Clear previous errors
             clearErrors();
@@ -310,15 +335,20 @@
             uploadBtn.textContent = 'Uploading...';
             
             try {
+                const payload = {
+                    repo_url: repoUrl,
+                    github_token: githubToken || undefined,
+                    bd_project_name: bdProjectName || undefined,
+                    bd_project_version: bdProjectVersion || undefined,
+                    bd_api_token: bdApiToken || undefined
+                };
+                
                 const response = await fetch(`${API_BASE_URL}/scan/upload-repository`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        repo_url: repoUrl,
-                        github_token: githubToken || undefined
-                    })
+                    body: JSON.stringify(payload)
                 });
                 
                 const data = await response.json();
@@ -468,7 +498,8 @@
                 { name: 'trivy', result: currentScanResults.trivy_sbom },
                 { name: 'syft', result: currentScanResults.syft_sbom },
                 { name: 'cdxgen', result: currentScanResults.cdxgen_sbom },
-                { name: 'ghas', result: currentScanResults.ghas_sbom, label: 'GitHub Advanced Security' }
+                { name: 'ghas', result: currentScanResults.ghas_sbom, label: 'GitHub Advanced Security' },
+                { name: 'bd', result: currentScanResults.bd_sbom, label: 'Black Duck' }
             ];
             
             // Debug each scanner with more details

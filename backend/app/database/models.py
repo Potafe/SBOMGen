@@ -17,6 +17,7 @@ class ScanResultsDB(Base):
     syft_sbom = Column(JSONB) 
     cdxgen_sbom = Column(JSONB)
     ghas_sbom = Column(JSONB)
+    bd_sbom = Column(JSONB)
     uploaded_sbom = Column(JSONB)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True))

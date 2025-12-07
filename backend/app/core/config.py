@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     SYFT_TIMEOUT: int = 5000
     CDXGEN_TIMEOUT: int = 5000
     GHAS_TIMEOUT: int = 30  # GitHub API timeout in seconds
+    BD_TIMEOUT: int = 60  # Black Duck API timeout in seconds
     CYCLONEDX_CONVERT_TIMEOUT: int = 100
 
     class Config:

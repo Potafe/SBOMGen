@@ -26,10 +26,24 @@ sbom_merge = SBOMMerge()
 async def upload_repository(repo: RepositoryUpload, background_tasks: BackgroundTasks) -> ScanResponse:
     """
     Upload a GitHub repository URL and initiate scanning.
+    Optionally provide Black Duck project details to fetch SBOM from Black Duck.
     """
     try:
-        scan_id = await sbom_service.start_scan(repo.repo_url, repo.github_token)
-        background_tasks.add_task(sbom_service.run_scan, scan_id, repo.github_token)
+        scan_id = await sbom_service.start_scan(
+            repo.repo_url, 
+            repo.github_token,
+            repo.bd_project_name,
+            repo.bd_project_version,
+            repo.bd_api_token
+        )
+        background_tasks.add_task(
+            sbom_service.run_scan, 
+            scan_id, 
+            repo.github_token,
+            repo.bd_project_name,
+            repo.bd_project_version,
+            repo.bd_api_token
+        )
         return ScanResponse(scan_id=scan_id, status="started", message="Cloning and scanning the repository.")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to start scan: {str(e)}")

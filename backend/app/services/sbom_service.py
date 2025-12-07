@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.utils.tech_stack import detect_tech_stack
 from app.services.package_analyze import PackageAnalyze
 from app.services.github_service import GithubService
+from app.services.bd_service import BDService
 from app.services.database_service import db_service
 
 logger = logging.getLogger(__name__)
@@ -29,8 +30,16 @@ class SBOMService:
         self.docker_client = docker.from_env()
         self.package_analyzer = PackageAnalyze()
         self.github_service = GithubService()
+        self.bd_service = BDService()
 
-    async def start_scan(self, repo_url: str, github_token: Optional[str] = None) -> str:
+    async def start_scan(
+        self, 
+        repo_url: str, 
+        github_token: Optional[str] = None,
+        bd_project_name: Optional[str] = None,
+        bd_project_version: Optional[str] = None,
+        bd_api_token: Optional[str] = None
+    ) -> str:
         scan_id = str(uuid.uuid4())
         logger.info(f"Starting scan for repo: {repo_url}, scan_id: {scan_id}")
         scan = ScanResults(
@@ -43,7 +52,14 @@ class SBOMService:
         await db_service.save_scan_results(scan)
         return scan_id
     
-    async def run_scan(self, scan_id: str, github_token: Optional[str] = None):
+    async def run_scan(
+        self, 
+        scan_id: str, 
+        github_token: Optional[str] = None,
+        bd_project_name: Optional[str] = None,
+        bd_project_version: Optional[str] = None,
+        bd_api_token: Optional[str] = None
+    ):
         scan = await db_service.get_scan_results(scan_id)
         if not scan:
             return
@@ -67,11 +83,20 @@ class SBOMService:
             syft_result = await self._run_scanner(scan_id, ScannerType.SYFT, repo_path)
             cdxgen_result = await self._run_scanner(scan_id, ScannerType.CDXGEN, repo_path)
             ghas_result = await self._run_scanner(scan_id, ScannerType.GHAS, repo_path, github_token, scan.repo_url)
+            bd_result = await self._run_scanner(
+                scan_id, 
+                ScannerType.BLACKDUCK, 
+                repo_path,
+                bd_project_name=bd_project_name,
+                bd_project_version=bd_project_version,
+                bd_api_token=bd_api_token
+            )
 
             scan.trivy_sbom = trivy_result
             scan.syft_sbom = syft_result
             scan.cdxgen_sbom = cdxgen_result
             scan.ghas_sbom = ghas_result
+            scan.bd_sbom = bd_result
             scan.status = ScanStatus.COMPLETED
             scan.completed_at = datetime.now()
             logger.info(f"Scan {scan_id} completed successfully")
@@ -96,6 +121,10 @@ class SBOMService:
             if ghas_result and ghas_result.sbom:
                 ghas_packages = self.package_analyzer.extract_spdx_packages(ghas_result.sbom, ScannerType.GHAS)
                 await db_service.save_packages(scan_id, ScannerType.GHAS.value, ghas_packages)
+            
+            if bd_result and bd_result.sbom:
+                bd_packages = self.package_analyzer.extract_packages(bd_result.sbom, ScannerType.BLACKDUCK)
+                await db_service.save_packages(scan_id, ScannerType.BLACKDUCK.value, bd_packages)
 
             # await self._handle_reruns(scan_id)
         except Exception as e:
@@ -110,7 +139,10 @@ class SBOMService:
         scanner: ScannerType, 
         repo_path: str = None,
         github_token: Optional[str] = None,
-        repo_url: Optional[str] = None
+        repo_url: Optional[str] = None,
+        bd_project_name: Optional[str] = None,
+        bd_project_version: Optional[str] = None,
+        bd_api_token: Optional[str] = None
     ) -> SBOMResult:
         logger.info(f"Running {scanner.value} for scan {scan_id}")
         try:
@@ -194,6 +226,38 @@ class SBOMService:
                 
                 # Clean up temp file
                 os.unlink(temp_file_path)
+            
+            elif scanner == ScannerType.BLACKDUCK:
+                if not all([bd_project_name, bd_project_version, bd_api_token]):
+                    logger.info(f"Black Duck parameters not provided, skipping BD scanner")
+                    return SBOMResult(
+                        scanner=scanner,
+                        sbom=None,
+                        component_count=0,
+                        error="Black Duck parameters not provided"
+                    )
+                
+                # Fetch SBOM from Black Duck API
+                sbom_data = await self.bd_service.fetch_sbom(
+                    project_name=bd_project_name,
+                    project_version=bd_project_version,
+                    api_token=bd_api_token
+                )
+                
+                # Save to temp file for consistency
+                with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as temp_file:
+                    temp_file_path = temp_file.name
+                    json.dump(sbom_data, temp_file, indent=2)
+                
+                # Verify file was written correctly
+                with open(temp_file_path, 'r') as f:
+                    sbom_data = json.load(f)
+                
+                component_count = len(sbom_data.get("components", []))
+                
+                # Clean up temp file
+                os.unlink(temp_file_path)
+            
             else:
                 raise Exception(f"Unknown scanner type: {scanner.value}")
 
@@ -228,6 +292,8 @@ class SBOMService:
                 return scan.cdxgen_sbom.sbom if scan.cdxgen_sbom else None
             elif scanner == ScannerType.GHAS:
                 return scan.ghas_sbom.sbom if scan.ghas_sbom else None
+            elif scanner == ScannerType.BLACKDUCK:
+                return scan.bd_sbom.sbom if scan.bd_sbom else None
             elif scanner == ScannerType.UPLOADED:
                 return scan.uploaded_sbom.sbom if scan.uploaded_sbom else None
         

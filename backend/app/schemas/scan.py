@@ -20,6 +20,9 @@ class ScannerType(str, Enum):
 class RepositoryUpload(BaseModel):
     repo_url: HttpUrl
     github_token: Optional[str] = None  # for pvt repos
+    bd_project_name: Optional[str] = None
+    bd_project_version: Optional[str] = None
+    bd_api_token: Optional[str] = None
 
 class ScanResponse(BaseModel):
     scan_id: str
@@ -43,6 +46,7 @@ class ScanResults(BaseModel):
     syft_sbom: Optional[SBOMResult] = None
     cdxgen_sbom: Optional[SBOMResult] = None
     ghas_sbom: Optional[SBOMResult] = None
+    bd_sbom: Optional[SBOMResult] = None
     tech_stack: Optional[List[str]] = None
     uploaded_sbom: Optional[SBOMResult] = None
 
