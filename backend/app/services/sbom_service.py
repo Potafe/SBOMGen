@@ -58,7 +58,9 @@ class SBOMService:
         github_token: Optional[str] = None,
         bd_project_name: Optional[str] = None,
         bd_project_version: Optional[str] = None,
-        bd_api_token: Optional[str] = None
+        bd_api_token: Optional[str] = None,
+        uploaded_sbom_content: Optional[bytes] = None,
+        uploaded_sbom_format: Optional[str] = None
     ):
         scan = await db_service.get_scan_results(scan_id)
         if not scan:
@@ -125,6 +127,30 @@ class SBOMService:
             if bd_result and bd_result.sbom:
                 bd_packages = self.package_analyzer.extract_packages(bd_result.sbom, ScannerType.BLACKDUCK)
                 await db_service.save_packages(scan_id, ScannerType.BLACKDUCK.value, bd_packages)
+            
+            # Process uploaded SBOM if provided
+            if uploaded_sbom_content and uploaded_sbom_format:
+                logger.info(f"Processing uploaded SBOM for scan {scan_id}, format: {uploaded_sbom_format}")
+                uploaded_result = await self._process_uploaded_sbom_for_scan(
+                    uploaded_sbom_content,
+                    uploaded_sbom_format
+                )
+                scan.uploaded_sbom = uploaded_result
+                
+                if uploaded_result and uploaded_result.sbom:
+                    # Extract packages based on format
+                    if uploaded_sbom_format.lower() == 'spdx':
+                        uploaded_packages = self.package_analyzer.extract_spdx_packages(
+                            uploaded_result.sbom, 
+                            ScannerType.UPLOADED
+                        )
+                    else:  # cyclonedx
+                        uploaded_packages = self.package_analyzer.extract_packages(
+                            uploaded_result.sbom, 
+                            ScannerType.UPLOADED
+                        )
+                    await db_service.save_packages(scan_id, ScannerType.UPLOADED.value, uploaded_packages)
+                    logger.info(f"Saved {len(uploaded_packages)} packages from uploaded SBOM")
 
             # await self._handle_reruns(scan_id)
         except Exception as e:
@@ -445,3 +471,47 @@ class SBOMService:
     async def get_uploaded_scan_results(self, scan_id: str) -> Optional[UploadedScanResults]:
         logger.info(f"Retrieving uploaded scan results for scan {scan_id}")
         return await db_service.get_uploaded_scan_results(scan_id)
+    
+    async def _process_uploaded_sbom_for_scan(
+        self, 
+        sbom_content: bytes, 
+        sbom_format: str
+    ) -> SBOMResult:
+        """
+        Process uploaded SBOM file for comparison with scanner results.
+        Returns SBOMResult with parsed SBOM data.
+        """
+        try:
+            # Parse JSON content
+            sbom_data = json.loads(sbom_content.decode('utf-8'))
+            
+            # Count components based on format
+            if sbom_format.lower() == 'spdx':
+                component_count = len(sbom_data.get("packages", []))
+            else:  # cyclonedx
+                component_count = len(sbom_data.get("components", []))
+            
+            logger.info(f"Processed uploaded SBOM: format={sbom_format}, components={component_count}")
+            
+            return SBOMResult(
+                scanner=ScannerType.UPLOADED,
+                sbom=sbom_data,
+                component_count=component_count,
+                error=None
+            )
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse uploaded SBOM: {e}")
+            return SBOMResult(
+                scanner=ScannerType.UPLOADED,
+                sbom=None,
+                component_count=0,
+                error=f"Invalid JSON format: {str(e)}"
+            )
+        except Exception as e:
+            logger.error(f"Error processing uploaded SBOM: {e}")
+            return SBOMResult(
+                scanner=ScannerType.UPLOADED,
+                sbom=None,
+                component_count=0,
+                error=str(e)
+            )

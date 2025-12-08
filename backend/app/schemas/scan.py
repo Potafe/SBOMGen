@@ -23,6 +23,7 @@ class RepositoryUpload(BaseModel):
     bd_project_name: Optional[str] = None
     bd_project_version: Optional[str] = None
     bd_api_token: Optional[str] = None
+    uploaded_sbom_format: Optional[str] = None  # 'spdx' or 'cyclonedx'
 
 class ScanResponse(BaseModel):
     scan_id: str

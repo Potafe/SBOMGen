@@ -6,7 +6,7 @@ from fastapi import (
     UploadFile, Form 
 )
 from fastapi.responses import JSONResponse
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from app.schemas.scan import (
     RepositoryUpload, ScanResponse, 
     ScannerType, ScanResults, 
@@ -23,26 +23,44 @@ sbom_service = SBOMService()
 sbom_merge = SBOMMerge()
 
 @router.post("/upload-repository", response_model=ScanResponse)
-async def upload_repository(repo: RepositoryUpload, background_tasks: BackgroundTasks) -> ScanResponse:
+async def upload_repository(
+    background_tasks: BackgroundTasks,
+    repo_url: str = Form(...),
+    github_token: Optional[str] = Form(None),
+    bd_project_name: Optional[str] = Form(None),
+    bd_project_version: Optional[str] = Form(None),
+    bd_api_token: Optional[str] = Form(None),
+    uploaded_sbom_format: Optional[str] = Form(None),
+    uploaded_sbom_file: Optional[UploadFile] = File(None)
+) -> ScanResponse:
     """
     Upload a GitHub repository URL and initiate scanning.
-    Optionally provide Black Duck project details to fetch SBOM from Black Duck.
+    Optionally provide:
+    - Black Duck project details to fetch SBOM from Black Duck
+    - An SBOM file to compare with scanner results
     """
     try:
+        # Read uploaded SBOM file if provided
+        uploaded_sbom_content = None
+        if uploaded_sbom_file:
+            uploaded_sbom_content = await uploaded_sbom_file.read()
+        
         scan_id = await sbom_service.start_scan(
-            repo.repo_url, 
-            repo.github_token,
-            repo.bd_project_name,
-            repo.bd_project_version,
-            repo.bd_api_token
+            repo_url, 
+            github_token,
+            bd_project_name,
+            bd_project_version,
+            bd_api_token
         )
         background_tasks.add_task(
             sbom_service.run_scan, 
             scan_id, 
-            repo.github_token,
-            repo.bd_project_name,
-            repo.bd_project_version,
-            repo.bd_api_token
+            github_token,
+            bd_project_name,
+            bd_project_version,
+            bd_api_token,
+            uploaded_sbom_content,
+            uploaded_sbom_format
         )
         return ScanResponse(scan_id=scan_id, status="started", message="Cloning and scanning the repository.")
     except Exception as e:

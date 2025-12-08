@@ -162,7 +162,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>SBOM Generator</h1>
+            <h1>SBOM Collaborator</h1>
             <p>Upload a GitHub repository to generate Software Bill of Materials from various scanners</p>
             <div style="margin-top: 1rem;">
                 <a href="/static/upload-sbom.html" class="btn btn-outline" style="width: auto; margin-right: 0.5rem;">
@@ -212,6 +212,26 @@
                         <label for="bd_api_token">Black Duck API Token</label>
                         <input type="password" id="bd_api_token" placeholder="Enter API token">
                         <small>Black Duck API token for authentication</small>
+                    </div>
+                </div>
+                
+                <div style="margin: 1.5rem 0; padding-top: 1.5rem; border-top: 1px solid #e5e7eb;">
+                    <h3 style="font-size: 1rem; margin-bottom: 1rem; color: #374151;">Upload SBOM for Comparison (Optional)</h3>
+                    
+                    <div class="form-group">
+                        <label for="uploaded_sbom_format">SBOM Format</label>
+                        <select id="uploaded_sbom_format" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.875rem;">
+                            <option value="">-- Select Format --</option>
+                            <option value="cyclonedx">CycloneDX</option>
+                            <option value="spdx">SPDX</option>
+                        </select>
+                        <small>Select the format of your SBOM file</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="uploaded_sbom_file">SBOM File</label>
+                        <input type="file" id="uploaded_sbom_file" accept=".json" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.875rem;">
+                        <small>Upload your SBOM JSON file to compare with scanner results</small>
                     </div>
                 </div>
                 
@@ -322,6 +342,8 @@
             const bdProjectName = document.getElementById('bd_project_name').value;
             const bdProjectVersion = document.getElementById('bd_project_version').value;
             const bdApiToken = document.getElementById('bd_api_token').value;
+            const uploadedSbomFormat = document.getElementById('uploaded_sbom_format').value;
+            const uploadedSbomFile = document.getElementById('uploaded_sbom_file').files[0];
             
             // Clear previous errors
             clearErrors();
@@ -331,24 +353,35 @@
                 return;
             }
             
+            // Validate uploaded SBOM if provided
+            if (uploadedSbomFile && !uploadedSbomFormat) {
+                showError('upload_error', 'Please select SBOM format when uploading a file');
+                return;
+            }
+            
+            if (uploadedSbomFormat && !uploadedSbomFile) {
+                showError('upload_error', 'Please select a file when SBOM format is specified');
+                return;
+            }
+            
             uploadBtn.disabled = true;
             uploadBtn.textContent = 'Uploading...';
             
             try {
-                const payload = {
-                    repo_url: repoUrl,
-                    github_token: githubToken || undefined,
-                    bd_project_name: bdProjectName || undefined,
-                    bd_project_version: bdProjectVersion || undefined,
-                    bd_api_token: bdApiToken || undefined
-                };
+                // Use FormData for multipart/form-data
+                const formData = new FormData();
+                formData.append('repo_url', repoUrl);
+                
+                if (githubToken) formData.append('github_token', githubToken);
+                if (bdProjectName) formData.append('bd_project_name', bdProjectName);
+                if (bdProjectVersion) formData.append('bd_project_version', bdProjectVersion);
+                if (bdApiToken) formData.append('bd_api_token', bdApiToken);
+                if (uploadedSbomFormat) formData.append('uploaded_sbom_format', uploadedSbomFormat);
+                if (uploadedSbomFile) formData.append('uploaded_sbom_file', uploadedSbomFile);
                 
                 const response = await fetch(`${API_BASE_URL}/scan/upload-repository`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(payload)
+                    body: formData  // Don't set Content-Type header, browser will set it with boundary
                 });
                 
                 const data = await response.json();
@@ -499,7 +532,8 @@
                 { name: 'syft', result: currentScanResults.syft_sbom },
                 { name: 'cdxgen', result: currentScanResults.cdxgen_sbom },
                 { name: 'ghas', result: currentScanResults.ghas_sbom, label: 'GitHub Advanced Security' },
-                { name: 'bd', result: currentScanResults.bd_sbom, label: 'Black Duck' }
+                { name: 'bd', result: currentScanResults.bd_sbom, label: 'Black Duck' },
+                { name: 'uploaded', result: currentScanResults.uploaded_sbom, label: 'Uploaded SBOM' }
             ];
             
             // Debug each scanner with more details

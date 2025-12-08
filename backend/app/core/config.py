@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     API_V1_STRING: str = "/api/v1"
-    PROJECT_NAME: str = "SBOM Generator"
+    PROJECT_NAME: str = "SBOM Collaborator"
 
     DOCKER_REGISTRY: Optional[str] = None
     SCANNER_IMAGE_TAG: str = "latest"
