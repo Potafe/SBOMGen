@@ -577,14 +577,18 @@ class DatabaseService:
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return {}
     
-    async def get_package_counts(self, scan_id: str) -> Dict[str, int]:
-        """Get total package counts for each scanner."""
+    async def get_package_counts(self, scan_id: str) -> Dict[str, Dict[str, int]]:
+        """
+        Get package counts for each scanner including both unique and total counts.
+        Returns: {scanner_name: {unique: X, total: Y, duplicates: Z}}
+        """
         try:
             async with AsyncSessionLocal() as session:
                 query = text("""
                     SELECT 
                         scanner_name,
-                        COUNT(*) as count
+                        COUNT(*) as total_count,
+                        COUNT(DISTINCT (name, version)) as unique_count
                     FROM packages
                     WHERE scan_id = :scan_id
                     GROUP BY scanner_name
@@ -593,7 +597,15 @@ class DatabaseService:
                 result = await session.execute(query, {"scan_id": scan_id})
                 rows = result.fetchall()
                 
-                counts = {row.scanner_name: row.count for row in rows}
+                counts = {}
+                for row in rows:
+                    duplicates = row.total_count - row.unique_count
+                    counts[row.scanner_name] = {
+                        "unique": row.unique_count,
+                        "total": row.total_count,
+                        "duplicates": duplicates
+                    }
+                
                 logger.info(f"Package counts for scan {scan_id}: {counts}")
                 return counts
         except Exception as e:
@@ -615,7 +627,10 @@ class DatabaseService:
             # Calculate simple scores based on commonality
             scores = {}
             for scanner in total_counts.keys():
-                if total_counts[scanner] == 0:
+                scanner_counts = total_counts[scanner]
+                unique_pkg_count = scanner_counts.get("unique", 0)
+                
+                if unique_pkg_count == 0:
                     scores[scanner] = 0.0
                     continue
                 
@@ -626,8 +641,8 @@ class DatabaseService:
                 
                 # Score: higher is better (more common packages)
                 # Penalize excessive uniqueness slightly
-                common_ratio = (exact_count + fuzzy_count * 0.5) / total_counts[scanner]
-                unique_ratio = unique_count / total_counts[scanner]
+                common_ratio = (exact_count + fuzzy_count * 0.5) / unique_pkg_count
+                unique_ratio = unique_count / unique_pkg_count
                 scores[scanner] = max(0, common_ratio * 100 - unique_ratio * 10)
             
             return {

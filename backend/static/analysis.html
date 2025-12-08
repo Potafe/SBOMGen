@@ -300,13 +300,34 @@
 
         function displayStats(counts) {
             const stats = document.getElementById('stats');
-            stats.innerHTML = Object.entries(counts).map(([scanner, count]) => `
-                <div class="stat-box">
-                    <div class="label">${scanner}</div>
-                    <div class="value">${count.toLocaleString()}</div>
-                    <div class="sublabel">total packages</div>
-                </div>
-            `).join('');
+            stats.innerHTML = Object.entries(counts).map(([scanner, countData]) => {
+                // Handle both old format (number) and new format (object)
+                if (typeof countData === 'number') {
+                    return `
+                        <div class="stat-box">
+                            <div class="label">${scanner}</div>
+                            <div class="value">${countData.toLocaleString()}</div>
+                            <div class="sublabel">total packages</div>
+                        </div>
+                    `;
+                }
+                
+                const unique = countData.unique || 0;
+                const total = countData.total || 0;
+                const duplicates = countData.duplicates || 0;
+                
+                return `
+                    <div class="stat-box">
+                        <div class="label">${scanner}</div>
+                        <div class="value">${unique.toLocaleString()}</div>
+                        <div class="sublabel">
+                            ${duplicates > 0 
+                                ? `unique packages<br><span style="color: #dc3545; font-size: 10px;">(${total.toLocaleString()} total with ${duplicates} ${duplicates === 1 ? 'duplicate' : 'duplicates'})</span>` 
+                                : 'unique packages'}
+                        </div>
+                    </div>
+                `;
+            }).join('');
         }
 
         function displayExactMatches(matches) {
