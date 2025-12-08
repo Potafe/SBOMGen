@@ -13,7 +13,7 @@ class ScannerType(str, Enum):
     TRIVY = "trivy"
     SYFT = "syft"
     CDXGEN = "cdxgen"
-    BLACKDUCK = "bd"
+    BLACKDUCK = "blackduck"
     GHAS = "ghas"
     UPLOADED = "uploaded"
 
