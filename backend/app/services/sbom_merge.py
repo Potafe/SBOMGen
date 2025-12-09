@@ -46,6 +46,15 @@ logger = logging.getLogger(__name__)
 class SBOMMerge:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        # Common SPDX license identifiers (subset for validation)
+        # Full list: https://spdx.org/licenses/
+        self.valid_spdx_licenses = {
+            "MIT", "Apache-2.0", "GPL-2.0", "GPL-3.0", "BSD-2-Clause", "BSD-3-Clause",
+            "ISC", "LGPL-2.1", "LGPL-3.0", "MPL-2.0", "CDDL-1.0", "EPL-1.0", "EPL-2.0",
+            "AGPL-3.0", "Unlicense", "CC0-1.0", "WTFPL", "Zlib", "BSL-1.0", "AFL-3.0",
+            "Apache-1.1", "Artistic-2.0", "CC-BY-4.0", "CC-BY-SA-4.0", "PSF-2.0",
+            "Python-2.0", "Ruby", "Vim", "0BSD", "BlueOak-1.0.0", "bzip2-1.0.6"
+        }
     
     async def merge_sboms(self, scan_id: str, include_all_unique: bool = True, 
                          exclude_github_actions: bool = False) -> Dict[str, Any]:
@@ -218,7 +227,7 @@ class SBOMMerge:
                     text("""
                         SELECT 
                             name, version, purl, cpe, licenses, component_type, 
-                            description, match_status, original_ref, scanner_name,
+                            description, match_status, original_ref, scanner_name, "primary",
                             COUNT(*) OVER (PARTITION BY name, version) as occurrence_count
                         FROM packages 
                         WHERE scan_id = :scan_id
@@ -228,37 +237,87 @@ class SBOMMerge:
                 )
                 packages_data = result.fetchall()
                 
+                # Log primary packages found in database
+                primary_packages = [pkg for pkg in packages_data if pkg.primary == "true"]
+                if primary_packages:
+                    self.logger.info(f"Found {len(primary_packages)} primary packages in database:")
+                    for pkg in primary_packages:
+                        self.logger.info(f"  - {pkg.name}@{pkg.version} (scanner: {pkg.scanner_name}, match_status: {pkg.match_status})")
+                else:
+                    self.logger.warning("No primary packages found in database for this scan")
+                
                 # Build merged components with intelligent selection
                 merged_components = []
                 seen_packages = set()
                 package_id_map = {}  # Map (scanner, original_ref) to merged bom-ref
+                primary_component = None  # Track primary package for metadata
                 
+                # FIRST PASS: Always include primary package regardless of match status
+                for pkg in packages_data:
+                    if pkg.primary == "true" and not primary_component:
+                        pkg_key = (pkg.name, pkg.version)
+                        if pkg_key not in seen_packages:
+                            # Skip GitHub Actions packages (unsupported by analyzers)
+                            if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
+                                continue
+                            seen_packages.add(pkg_key)
+                            component = self._build_component(pkg)
+                            merged_components.append(component)
+                            primary_component = component.copy()
+                            bom_ref = component["bom-ref"]
+                            package_id_map[(pkg.scanner_name, pkg.original_ref)] = bom_ref
+                            self.logger.info(f"✓ Added PRIMARY package to merge: {pkg.name}@{pkg.version} (scanner: {pkg.scanner_name}, match_status: {pkg.match_status})")
+                            break  # Only one primary package
+                
+                # SECOND PASS: Process all other packages based on match status
                 for pkg in packages_data:
                     pkg_key = (pkg.name, pkg.version)
                     
-                    # Skip if already added
+                    # Skip if already added (but still check for primary)
                     if pkg_key in seen_packages:
                         bom_ref = f"pkg:{pkg.purl}" if pkg.purl else f"{pkg.name}@{pkg.version}"
                         package_id_map[(pkg.scanner_name, pkg.original_ref)] = bom_ref
+                        # Check if this duplicate is the primary package
+                        if pkg.primary == "true" and not primary_component:
+                            # Find the already-added component in merged_components
+                            for comp in merged_components:
+                                if comp.get("name") == pkg.name and comp.get("version") == pkg.version:
+                                    primary_component = comp.copy()
+                                    self.logger.info(f"✓ Captured PRIMARY component (duplicate entry): {pkg.name}@{pkg.version} from scanner={pkg.scanner_name}")
+                                    break
                         continue
                     
                     # Step 1: Always include exact matches
                     if pkg.match_status == "exact":
+                        # Skip GitHub Actions packages (unsupported by analyzers)
+                        if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
+                            continue
                         seen_packages.add(pkg_key)
                         component = self._build_component(pkg)
                         merged_components.append(component)
                         bom_ref = component["bom-ref"]
                         package_id_map[(pkg.scanner_name, pkg.original_ref)] = bom_ref
+                        # Track primary package
+                        if pkg.primary == "true" and not primary_component:
+                            primary_component = component.copy()
+                            self.logger.info(f"Captured PRIMARY component (exact match): {pkg.name}@{pkg.version} from scanner={pkg.scanner_name}")
                         continue
                     
                     # Step 2: Include fuzzy matches (higher occurrence = more likely to be correct)
                     if pkg.match_status == "fuzzy":
                         if pkg.occurrence_count >= 2:  # Found by at least 2 scanners
+                            # Skip GitHub Actions packages (unsupported by analyzers)
+                            if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
+                                continue
                             seen_packages.add(pkg_key)
                             component = self._build_component(pkg)
                             merged_components.append(component)
                             bom_ref = component["bom-ref"]
                             package_id_map[(pkg.scanner_name, pkg.original_ref)] = bom_ref
+                            # Track primary package
+                            if pkg.primary == "true" and not primary_component:
+                                primary_component = component.copy()
+                                self.logger.info(f"✓ Captured PRIMARY component (fuzzy match): {pkg.name}@{pkg.version} from scanner={pkg.scanner_name}")
                         continue
                     
                     # Step 3: Handle unique packages based on options
@@ -269,11 +328,18 @@ class SBOMMerge:
                         
                         # Include all unique packages if option is set
                         if include_all_unique:
+                            # Skip GitHub Actions packages (unsupported by analyzers)
+                            if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
+                                continue
                             seen_packages.add(pkg_key)
                             component = self._build_component(pkg)
                             merged_components.append(component)
                             bom_ref = component["bom-ref"]
                             package_id_map[(pkg.scanner_name, pkg.original_ref)] = bom_ref
+                            # Track primary package
+                            if pkg.primary == "true" and not primary_component:
+                                primary_component = component.copy()
+                                self.logger.info(f"✓ Captured PRIMARY component (unique): {pkg.name}@{pkg.version} from scanner={pkg.scanner_name}")
                 
                 # Step 4: Preserve all relationships (dependencies)
                 dep_result = await session.execute(
@@ -326,42 +392,51 @@ class SBOMMerge:
                     consolidated_deps[ref]["dependsOn"] = list(set(consolidated_deps[ref]["dependsOn"]))
                 
                 # Step 5: Build final merged SBOM in CycloneDX format
+                metadata = {
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "tools": [
+                        {
+                            "vendor": "SBOMGen",
+                            "name": "SBOM Custom Merge Tool",
+                            "version": "1.0.0"
+                        }
+                    ],
+                    "properties": [
+                        {
+                            "name": "sbomgen:scan_id",
+                            "value": scan_id
+                        },
+                        {
+                            "name": "sbomgen:total_components",
+                            "value": str(len(merged_components))
+                        },
+                        {
+                            "name": "sbomgen:total_dependencies",
+                            "value": str(len(consolidated_deps))
+                        },
+                        {
+                            "name": "sbomgen:include_all_unique",
+                            "value": str(include_all_unique)
+                        },
+                        {
+                            "name": "sbomgen:exclude_github_actions",
+                            "value": str(exclude_github_actions)
+                        }
+                    ]
+                }
+                
+                # Add primary component to metadata if found
+                if primary_component:
+                    metadata["component"] = primary_component
+                    self.logger.info(f"Added PRIMARY component to merged SBOM metadata: {primary_component.get('name')}@{primary_component.get('version')}")
+                else:
+                    self.logger.warning(f"No PRIMARY component found for scan {scan_id} - merged SBOM will not have metadata.component")
+                
                 merged_sbom = {
                     "bomFormat": "CycloneDX",
                     "specVersion": "1.4",
                     "version": 1,
-                    "metadata": {
-                        "timestamp": datetime.utcnow().isoformat() + "Z",
-                        "tools": [
-                            {
-                                "vendor": "SBOMGen",
-                                "name": "SBOM Custom Merge Tool",
-                                "version": "1.0.0"
-                            }
-                        ],
-                        "properties": [
-                            {
-                                "name": "sbomgen:scan_id",
-                                "value": scan_id
-                            },
-                            {
-                                "name": "sbomgen:total_components",
-                                "value": str(len(merged_components))
-                            },
-                            {
-                                "name": "sbomgen:total_dependencies",
-                                "value": str(len(consolidated_deps))
-                            },
-                            {
-                                "name": "sbomgen:include_all_unique",
-                                "value": str(include_all_unique)
-                            },
-                            {
-                                "name": "sbomgen:exclude_github_actions",
-                                "value": str(exclude_github_actions)
-                            }
-                        ]
-                    },
+                    "metadata": metadata,
                     "components": merged_components,
                     "dependencies": list(consolidated_deps.values())
                 }
@@ -415,7 +490,7 @@ class SBOMMerge:
                     text("""
                         SELECT 
                             name, version, purl, cpe, licenses, component_type, 
-                            description, match_status, original_ref, scanner_name,
+                            description, match_status, original_ref, scanner_name, "primary",
                             COUNT(*) OVER (PARTITION BY name, version) as occurrence_count
                         FROM packages 
                         WHERE scan_id = :scan_id
@@ -425,48 +500,105 @@ class SBOMMerge:
                 )
                 packages_data = result.fetchall()
                 
+                # Log primary packages found in database
+                primary_packages = [pkg for pkg in packages_data if pkg.primary == "true"]
+                if primary_packages:
+                    logger.info(f"Found {len(primary_packages)} primary packages in database:")
+                    for pkg in primary_packages:
+                        logger.info(f"  - {pkg.name}@{pkg.version} (scanner: {pkg.scanner_name}, match_status: {pkg.match_status})")
+                else:
+                    logger.warning("No primary packages found in database for this scan")
+                
                 # Build merged components with user selections
                 merged_components = []
                 seen_packages = set()
                 package_id_map = {}  # Map (scanner, original_ref) to merged bom-ref
+                primary_component = None  # Track primary package for metadata
                 
+                # FIRST PASS: Always include primary package regardless of match status or selections
+                for pkg in packages_data:
+                    if pkg.primary == "true" and not primary_component:
+                        pkg_key = (pkg.name, pkg.version)
+                        if pkg_key not in seen_packages:
+                            # Skip GitHub Actions packages (unsupported by analyzers)
+                            if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
+                                continue
+                            seen_packages.add(pkg_key)
+                            component = self._build_component(pkg)
+                            merged_components.append(component)
+                            primary_component = component.copy()
+                            bom_ref = component["bom-ref"]
+                            package_id_map[(pkg.scanner_name, pkg.original_ref)] = bom_ref
+                            logger.info(f"✓ Added PRIMARY package to merge: {pkg.name}@{pkg.version} (scanner: {pkg.scanner_name}, match_status: {pkg.match_status})")
+                            break  # Only one primary package
+                
+                # SECOND PASS: Process all other packages based on match status and selections
                 for pkg in packages_data:
                     pkg_key = (pkg.name, pkg.version)
                     
-                    # Skip if already added
+                    # Skip if already added (but still check for primary)
                     if pkg_key in seen_packages:
                         bom_ref = f"pkg:{pkg.purl}" if pkg.purl else f"{pkg.name}@{pkg.version}"
                         package_id_map[(pkg.scanner_name, pkg.original_ref)] = bom_ref
+                        # Check if this duplicate is the primary package
+                        if pkg.primary == "true" and not primary_component:
+                            # Find the already-added component in merged_components
+                            for comp in merged_components:
+                                if comp.get("name") == pkg.name and comp.get("version") == pkg.version:
+                                    primary_component = comp.copy()
+                                    logger.info(f"✓ Captured PRIMARY component (duplicate entry): {pkg.name}@{pkg.version} (scanner: {pkg.scanner_name})")
+                                    break
                         continue
                     
                     # Always include exact matches
                     if pkg.match_status == "exact":
+                        # Skip GitHub Actions packages (unsupported by analyzers)
+                        if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
+                            continue
                         seen_packages.add(pkg_key)
                         component = self._build_component(pkg)
                         merged_components.append(component)
                         bom_ref = component["bom-ref"]
                         package_id_map[(pkg.scanner_name, pkg.original_ref)] = bom_ref
+                        # Track primary package
+                        if pkg.primary == "true" and not primary_component:
+                            primary_component = component.copy()
+                            logger.info(f"✓ Captured PRIMARY component from exact match: {pkg.name}@{pkg.version} (scanner: {pkg.scanner_name})")
                         continue
                     
                     # Include fuzzy matches (higher occurrence = more likely correct)
                     if pkg.match_status == "fuzzy":
                         if pkg.occurrence_count >= 2:
+                            # Skip GitHub Actions packages (unsupported by analyzers)
+                            if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
+                                continue
                             seen_packages.add(pkg_key)
                             component = self._build_component(pkg)
                             merged_components.append(component)
                             bom_ref = component["bom-ref"]
                             package_id_map[(pkg.scanner_name, pkg.original_ref)] = bom_ref
+                            # Track primary package
+                            if pkg.primary == "true" and not primary_component:
+                                primary_component = component.copy()
+                                logger.info(f"✓ Captured PRIMARY component from fuzzy match: {pkg.name}@{pkg.version} (scanner: {pkg.scanner_name})")
                         continue
                     
                     # Only include unique packages if user selected them
                     if pkg.match_status == "unique":
                         selection_key = (pkg.scanner_name, pkg.name, pkg.version)
                         if selection_key in selected_pkg_keys:
+                            # Skip GitHub Actions packages (unsupported by analyzers)
+                            if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
+                                continue
                             seen_packages.add(pkg_key)
                             component = self._build_component(pkg)
                             merged_components.append(component)
                             bom_ref = component["bom-ref"]
                             package_id_map[(pkg.scanner_name, pkg.original_ref)] = bom_ref
+                            # Track primary package
+                            if pkg.primary == "true" and not primary_component:
+                                primary_component = component.copy()
+                                logger.info(f"✓ Captured PRIMARY component from unique match: {pkg.name}@{pkg.version} (scanner: {pkg.scanner_name})")
                 
                 # Preserve all relationships (dependencies)
                 dep_result = await session.execute(
@@ -517,38 +649,47 @@ class SBOMMerge:
                     consolidated_deps[ref]["dependsOn"] = list(set(consolidated_deps[ref]["dependsOn"]))
                 
                 # Build final merged SBOM
+                metadata = {
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                    "tools": [
+                        {
+                            "vendor": "SBOMGen",
+                            "name": "SBOM Custom Merge Tool",
+                            "version": "1.0.0"
+                        }
+                    ],
+                    "properties": [
+                        {
+                            "name": "sbomgen:scan_id",
+                            "value": scan_id
+                        },
+                        {
+                            "name": "sbomgen:total_components",
+                            "value": str(len(merged_components))
+                        },
+                        {
+                            "name": "sbomgen:total_dependencies",
+                            "value": str(len(consolidated_deps))
+                        },
+                        {
+                            "name": "sbomgen:merge_type",
+                            "value": "user_selected"
+                        }
+                    ]
+                }
+                
+                # Add primary component to metadata if found
+                if primary_component:
+                    metadata["component"] = primary_component
+                    logger.info(f"✓ Added PRIMARY component to merged SBOM metadata: {primary_component.get('name')}@{primary_component.get('version')}")
+                else:
+                    logger.warning("⚠ No primary component was captured during merge - metadata.component will be missing")
+                
                 merged_sbom = {
                     "bomFormat": "CycloneDX",
                     "specVersion": "1.4",
                     "version": 1,
-                    "metadata": {
-                        "timestamp": datetime.utcnow().isoformat() + "Z",
-                        "tools": [
-                            {
-                                "vendor": "SBOMGen",
-                                "name": "SBOM Custom Merge Tool",
-                                "version": "1.0.0"
-                            }
-                        ],
-                        "properties": [
-                            {
-                                "name": "sbomgen:scan_id",
-                                "value": scan_id
-                            },
-                            {
-                                "name": "sbomgen:total_components",
-                                "value": str(len(merged_components))
-                            },
-                            {
-                                "name": "sbomgen:total_dependencies",
-                                "value": str(len(consolidated_deps))
-                            },
-                            {
-                                "name": "sbomgen:merge_type",
-                                "value": "user_selected"
-                            }
-                        ]
-                    },
+                    "metadata": metadata,
                     "components": merged_components,
                     "dependencies": list(consolidated_deps.values())
                 }
@@ -597,14 +738,22 @@ class SBOMMerge:
         if pkg.description:
             component["description"] = pkg.description
         
-        # Parse and add licenses
+        # Parse and add licenses (filter out invalid SPDX identifiers)
         if pkg.licenses:
             try:
                 licenses_list = json.loads(pkg.licenses)
                 if licenses_list:
-                    component["licenses"] = [
-                        {"license": {"id": lic}} for lic in licenses_list
-                    ]
+                    # Validate and filter licenses
+                    valid_licenses = []
+                    for lic in licenses_list:
+                        if self._is_valid_spdx_license(lic):
+                            valid_licenses.append({"license": {"id": lic}})
+                        else:
+                            # Use license name instead of id for non-SPDX licenses
+                            valid_licenses.append({"license": {"name": lic}})
+                    
+                    if valid_licenses:
+                        component["licenses"] = valid_licenses
             except:
                 pass
         
@@ -626,14 +775,49 @@ class SBOMMerge:
         
         return component
     
-    def _is_github_action_package(self, package_name: str) -> bool:
+    def _is_valid_spdx_license(self, license_id: str) -> bool:
+        """
+        Check if a license identifier is a valid SPDX license.
+        Returns True if valid, False otherwise.
+        """
+        if not license_id:
+            return False
+        
+        # Check against known SPDX licenses
+        # Also accept licenses with -only or -or-later suffixes (e.g., GPL-2.0-only)
+        base_license = license_id.replace("-only", "").replace("-or-later", "")
+        
+        return (
+            license_id in self.valid_spdx_licenses or 
+            base_license in self.valid_spdx_licenses or
+            license_id.startswith("LicenseRef-")  # Custom license references are valid
+        )
+    
+    def _is_github_action_package(self, package_name: str = None, package_dict: dict = None) -> bool:
         """Check if a package is a GitHub Actions workflow package."""
+        # Check by purl if package dict is provided
+        if package_dict:
+            purl = package_dict.get('purl', '')
+            if 'pkg:githubactions' in purl.lower():
+                return True
+            package_name = package_dict.get('name', '')
+        
+        if not package_name:
+            return False
+            
         github_action_patterns = [
             "actions/",
             "github/",
             ".github/",
             "workflow/",
-            "action-"
+            "action-",
+            "/app/temp",
+            "app/temp",
+            "temp",
+            ".yaml",
+            "setup",
+            "com.github",
+
         ]
         package_lower = package_name.lower()
         return any(pattern in package_lower for pattern in github_action_patterns)

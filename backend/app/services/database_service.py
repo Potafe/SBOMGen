@@ -315,7 +315,8 @@ class DatabaseService:
                         licenses=pkg.get("licenses", ""),
                         component_type=pkg.get("component_type", "library"),
                         description=pkg.get("description", ""),
-                        match_status="unique"  # Default, will be updated during merge
+                        match_status="unique",  # Default, will be updated during merge
+                        primary=pkg.get("primary", "false")
                     )
                     for pkg in packages
                 ]

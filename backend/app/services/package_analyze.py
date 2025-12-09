@@ -17,6 +17,16 @@ class PackageAnalyze:
         packages = []
         dependencies = []
         
+        # Identify primary package from metadata.component
+        primary_bom_ref = None
+        metadata = sbom_data.get("metadata", {})
+        if "component" in metadata:
+            primary_component = metadata["component"]
+            primary_bom_ref = primary_component.get("bom-ref") or primary_component.get("purl") or f"{primary_component.get('name', '')}@{primary_component.get('version', '')}"
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Found primary package in CycloneDX metadata: {primary_bom_ref}")
+        
         # Extract components
         for component in sbom_data.get("components", []):
             name = component.get("name", "").strip()
@@ -44,6 +54,14 @@ class PackageAnalyze:
                         licenses.append(lic["license"]["name"])
             
             if name:
+                # Check if this is the primary package
+                is_primary = "true" if (primary_bom_ref and bom_ref == primary_bom_ref) else "false"
+                
+                if is_primary == "true":
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"Marking package as primary: {name}@{version} (bom-ref: {bom_ref})")
+                
                 packages.append({
                     "name": name,
                     "version": version,
@@ -52,7 +70,8 @@ class PackageAnalyze:
                     "original_ref": bom_ref,
                     "licenses": json.dumps(licenses) if licenses else "",
                     "component_type": component.get("type", "library"),
-                    "description": component.get("description", "").strip()
+                    "description": component.get("description", "").strip(),
+                    "primary": is_primary
                 })
         
         # Extract dependencies
@@ -80,6 +99,16 @@ class PackageAnalyze:
         """
         packages = []
         dependencies = []
+        
+        # Identify primary package from DESCRIBES relationship
+        primary_spdx_id = None
+        for rel in spdx_data.get("relationships", []):
+            if rel.get("relationshipType") == "DESCRIBES" and rel.get("spdxElementId") == "SPDXRef-DOCUMENT":
+                primary_spdx_id = rel.get("relatedSpdxElement")
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"Found primary package in SPDX DESCRIBES relationship: {primary_spdx_id}")
+                break
         
         # Map SPDXID to package for relationship resolution
         spdxid_map = {}
@@ -109,7 +138,36 @@ class PackageAnalyze:
             if declared_license and declared_license != "NOASSERTION" and declared_license not in licenses:
                 licenses.append(declared_license)
             
+            # Extract component type from primaryPackagePurpose
+            component_type = "library"  # Default
+            primary_purpose = package.get("primaryPackagePurpose", "").upper()
+            if primary_purpose:
+                # Map SPDX primaryPackagePurpose to CycloneDX component type
+                purpose_map = {
+                    "APPLICATION": "application",
+                    "FRAMEWORK": "framework",
+                    "LIBRARY": "library",
+                    "CONTAINER": "container",
+                    "OPERATING-SYSTEM": "operating-system",
+                    "DEVICE": "device",
+                    "FIRMWARE": "firmware",
+                    "FILE": "file",
+                    "SOURCE": "library",  # Map to library
+                    "ARCHIVE": "library",  # Map to library
+                    "INSTALL": "library",  # Map to library
+                    "OTHER": "library"  # Map to library
+                }
+                component_type = purpose_map.get(primary_purpose, "library")
+            
             if name:
+                # Check if this is the primary package
+                is_primary = "true" if (primary_spdx_id and spdx_id == primary_spdx_id) else "false"
+                
+                if is_primary == "true":
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"Marking package as primary: {name}@{version} (SPDXID: {spdx_id})")
+                
                 pkg_data = {
                     "name": name,
                     "version": version,
@@ -117,8 +175,9 @@ class PackageAnalyze:
                     "cpe": cpe,
                     "original_ref": spdx_id,
                     "licenses": json.dumps(licenses) if licenses else "",
-                    "component_type": "library",
-                    "description": package.get("description", "").strip()
+                    "component_type": component_type,
+                    "description": package.get("description", "").strip(),
+                    "primary": is_primary
                 }
                 packages.append(pkg_data)
                 spdxid_map[spdx_id] = pkg_data

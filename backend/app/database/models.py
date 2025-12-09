@@ -59,6 +59,9 @@ class Package(Base):
     # Match status for merge logic
     match_status = Column(String, nullable=False, index=True, default="unique")
     
+    # Primary package indicator
+    primary = Column(String, default="false", index=True)
+    
     # Relationships
     dependencies = relationship("Dependency", foreign_keys='Dependency.parent_id', back_populates="parent")
     
