@@ -23,6 +23,9 @@ from app.services.github_service import GithubService
 from app.services.bd_service import BDService
 from app.services.database_service import db_service
 
+from app.database import AsyncSessionLocal
+from sqlalchemy import text
+
 logger = logging.getLogger(__name__)
 
 class SBOMService:
@@ -106,27 +109,32 @@ class SBOMService:
             # Save updated scan results
             await db_service.save_scan_results(scan)
             
-            # Extract and save packages for each scanner immediately
-            logger.info(f"Extracting and saving packages for scan {scan_id}")
+            # Extract and save packages and dependencies for each scanner
+            logger.info(f"Extracting and saving packages and dependencies for scan {scan_id}")
             if trivy_result and trivy_result.sbom:
-                trivy_packages = self.package_analyzer.extract_packages(trivy_result.sbom, ScannerType.TRIVY)
+                trivy_packages, trivy_deps = self.package_analyzer.extract_packages(trivy_result.sbom, ScannerType.TRIVY)
                 await db_service.save_packages(scan_id, ScannerType.TRIVY.value, trivy_packages)
+                await db_service.save_dependencies(scan_id, ScannerType.TRIVY.value, trivy_deps)
             
             if syft_result and syft_result.sbom:
-                syft_packages = self.package_analyzer.extract_packages(syft_result.sbom, ScannerType.SYFT)
+                syft_packages, syft_deps = self.package_analyzer.extract_packages(syft_result.sbom, ScannerType.SYFT)
                 await db_service.save_packages(scan_id, ScannerType.SYFT.value, syft_packages)
+                await db_service.save_dependencies(scan_id, ScannerType.SYFT.value, syft_deps)
             
             if cdxgen_result and cdxgen_result.sbom:
-                cdxgen_packages = self.package_analyzer.extract_packages(cdxgen_result.sbom, ScannerType.CDXGEN)
+                cdxgen_packages, cdxgen_deps = self.package_analyzer.extract_packages(cdxgen_result.sbom, ScannerType.CDXGEN)
                 await db_service.save_packages(scan_id, ScannerType.CDXGEN.value, cdxgen_packages)
+                await db_service.save_dependencies(scan_id, ScannerType.CDXGEN.value, cdxgen_deps)
 
             if ghas_result and ghas_result.sbom:
-                ghas_packages = self.package_analyzer.extract_spdx_packages(ghas_result.sbom, ScannerType.GHAS)
+                ghas_packages, ghas_deps = self.package_analyzer.extract_spdx_packages(ghas_result.sbom, ScannerType.GHAS)
                 await db_service.save_packages(scan_id, ScannerType.GHAS.value, ghas_packages)
+                await db_service.save_dependencies(scan_id, ScannerType.GHAS.value, ghas_deps)
             
             if bd_result and bd_result.sbom:
-                bd_packages = self.package_analyzer.extract_packages(bd_result.sbom, ScannerType.BLACKDUCK)
+                bd_packages, bd_deps = self.package_analyzer.extract_packages(bd_result.sbom, ScannerType.BLACKDUCK)
                 await db_service.save_packages(scan_id, ScannerType.BLACKDUCK.value, bd_packages)
+                await db_service.save_dependencies(scan_id, ScannerType.BLACKDUCK.value, bd_deps)
             
             # Process uploaded SBOM if provided
             if uploaded_sbom_content and uploaded_sbom_format:
@@ -138,19 +146,23 @@ class SBOMService:
                 scan.uploaded_sbom = uploaded_result
                 
                 if uploaded_result and uploaded_result.sbom:
-                    # Extract packages based on format
+                    # Extract packages and dependencies based on format
                     if uploaded_sbom_format.lower() == 'spdx':
-                        uploaded_packages = self.package_analyzer.extract_spdx_packages(
+                        uploaded_packages, uploaded_deps = self.package_analyzer.extract_spdx_packages(
                             uploaded_result.sbom, 
                             ScannerType.UPLOADED
                         )
                     else:  # cyclonedx
-                        uploaded_packages = self.package_analyzer.extract_packages(
+                        uploaded_packages, uploaded_deps = self.package_analyzer.extract_packages(
                             uploaded_result.sbom, 
                             ScannerType.UPLOADED
                         )
                     await db_service.save_packages(scan_id, ScannerType.UPLOADED.value, uploaded_packages)
-                    logger.info(f"Saved {len(uploaded_packages)} packages from uploaded SBOM")
+                    await db_service.save_dependencies(scan_id, ScannerType.UPLOADED.value, uploaded_deps)
+                    logger.info(f"Saved {len(uploaded_packages)} packages and {len(uploaded_deps)} dependencies from uploaded SBOM")
+            
+            # Note: Merged SBOM will be created on-demand when user explicitly requests it via the UI
+            logger.info(f"Scan {scan_id} completed. All packages and dependencies saved to database.")
 
             # await self._handle_reruns(scan_id)
         except Exception as e:
@@ -342,9 +354,10 @@ class SBOMService:
                 logger.info(f"Getting analysis for uploaded scan {scan_id}")
                 sbom_data = uploaded_results.uploaded_sbom.sbom
                 if sbom_data:
-                    # Extract and save packages if not already done
-                    pkg_list = self.package_analyzer.extract_packages(sbom_data, ScannerType.UPLOADED)
+                    # Extract packages and dependencies (extract_packages returns a tuple)
+                    pkg_list, deps_list = self.package_analyzer.extract_packages(sbom_data, ScannerType.UPLOADED)
                     await db_service.save_packages(scan_id, ScannerType.UPLOADED.value, pkg_list)
+                    await db_service.save_dependencies(scan_id, ScannerType.UPLOADED.value, deps_list)
                     
                     return {
                         "packages": pkg_list,
@@ -378,6 +391,80 @@ class SBOMService:
             return {"error": "SBOM not found for this scanner"}
         
         return self.package_analyzer.parse_sbom_graph(sbom_data)
+    
+    async def get_merged_sbom(self, scan_id: str, include_all_unique: bool = True, 
+                             exclude_github_actions: bool = False, 
+                             force_regenerate: bool = False) -> Optional[Dict[str, Any]]:
+        """
+        Get the merged SBOM for a scan.
+        
+        Args:
+            scan_id: The scan identifier
+            include_all_unique: Whether to include all unique packages
+            exclude_github_actions: Whether to exclude GitHub Actions packages
+            force_regenerate: Force regeneration even if cached version exists
+        """
+        try:
+            scan = await db_service.get_scan_results(scan_id)
+            if not scan:
+                logger.error(f"Scan {scan_id} not found")
+                return None
+            
+            # Check if merged SBOM already exists in database (unless forcing regeneration)
+            if not force_regenerate:                
+                async with AsyncSessionLocal() as session:
+                    result = await session.execute(
+                        text("SELECT merged_sbom FROM scan_results WHERE scan_id = :scan_id"),
+                        {"scan_id": scan_id}
+                    )
+                    row = result.fetchone()
+                    
+                    if row and row.merged_sbom:
+                        logger.info(f"Retrieved existing merged SBOM for scan {scan_id}")
+                        return row.merged_sbom
+            
+            # If not exists or force regenerate, create it
+            logger.info(f"Creating merged SBOM for scan {scan_id} (include_all_unique={include_all_unique}, exclude_github_actions={exclude_github_actions})")
+            merged_sbom = await db_service.merge_sboms(
+                scan_id=scan_id,
+                include_all_unique=include_all_unique,
+                exclude_github_actions=exclude_github_actions
+            )
+            return merged_sbom
+            
+        except Exception as e:
+            logger.error(f"Error getting merged SBOM for scan {scan_id}: {e}")
+            return None
+    
+    async def get_merged_sbom_with_selections(self, scan_id: str, 
+                                              selected_unique_packages: Dict[str, list]) -> Optional[Dict[str, Any]]:
+        """
+        Get the merged SBOM with specific unique packages selected by the user.
+        
+        Args:
+            scan_id: The scan identifier
+            selected_unique_packages: Dict mapping scanner names to lists of selected packages
+                Example: {
+                    "syft": [{"name": "pkg1", "version": "1.0.0"}],
+                    "trivy": [{"name": "pkg2", "version": "2.0.0"}]
+                }
+        """
+        try:
+            scan = await db_service.get_scan_results(scan_id)
+            if not scan:
+                logger.error(f"Scan {scan_id} not found")
+                return None
+            
+            logger.info(f"Creating merged SBOM for scan {scan_id} with specific package selections")
+            merged_sbom = await db_service.merge_sboms_with_selections(
+                scan_id=scan_id,
+                selected_unique_packages=selected_unique_packages
+            )
+            return merged_sbom
+            
+        except Exception as e:
+            logger.error(f"Error getting merged SBOM with selections for scan {scan_id}: {e}")
+            return None
     
     async def process_uploaded_sbom(self, filename: str, file_content: bytes, sbom_format: str) -> str:
         """Process an uploaded SBOM file and return scan_id."""
@@ -454,10 +541,11 @@ class SBOMService:
             # Save updated uploaded scan results
             await db_service.save_uploaded_scan_results(uploaded_scan)
             
-            # Extract and save packages
-            logger.info(f"Extracting and saving packages from uploaded SBOM for scan {scan_id}")
-            uploaded_packages = self.package_analyzer.extract_packages(sbom_data, ScannerType.UPLOADED)
+            # Extract and save packages and dependencies
+            logger.info(f"Extracting and saving packages and dependencies from uploaded SBOM for scan {scan_id}")
+            uploaded_packages, uploaded_deps = self.package_analyzer.extract_packages(sbom_data, ScannerType.UPLOADED)
             await db_service.save_packages(scan_id, ScannerType.UPLOADED.value, uploaded_packages)
+            await db_service.save_dependencies(scan_id, ScannerType.UPLOADED.value, uploaded_deps)
             
             logger.info(f"Successfully processed uploaded SBOM for scan {scan_id}")
             return scan_id

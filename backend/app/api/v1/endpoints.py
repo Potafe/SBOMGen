@@ -210,29 +210,81 @@ async def get_scan_graph(scan_id: str, scanner_name: str):
         raise HTTPException(status_code=500, detail=f"Failed to get graph data: {str(e)}")
 
 @router.get("/merge-sbom/{scan_id}")
-async def get_merge_sbom(scan_id: str):
+async def get_merge_sbom(
+    scan_id: str,
+    include_all_unique: bool = True,
+    exclude_github_actions: bool = False,
+    force_regenerate: bool = False
+):
     """
-    Get merged SBOM from all the scanners.
+    Get merged SBOM from all the scanners using intelligent database-driven merging.
+    
+    Args:
+        scan_id: The scan identifier
+        include_all_unique: Include all unique packages (default: True)
+        exclude_github_actions: Exclude GitHub Actions packages (default: False)
+        force_regenerate: Force regeneration of merged SBOM (default: False)
     """
     try:
         results = await sbom_service.get_scan_results(scan_id)
         if not results:
             raise HTTPException(status_code=404, detail="Scan not found")
         
-        sbom_data_list = []
-        scanner_names = []
+        # Use the new custom merge functionality with options
+        merged_sbom = await sbom_service.get_merged_sbom(
+            scan_id=scan_id,
+            include_all_unique=include_all_unique,
+            exclude_github_actions=exclude_github_actions,
+            force_regenerate=force_regenerate
+        )
         
-        for scanner in [ScannerType.TRIVY, ScannerType.SYFT, ScannerType.CDXGEN]:
-            sbom_data = await sbom_service.get_scanner_sbom(scan_id, scanner)
-            sbom_data_list.append(sbom_data)
-            scanner_names.append(scanner.value)
+        if not merged_sbom:
+            raise HTTPException(status_code=400, detail="Failed to create merged SBOM")
         
-        merged_result = await sbom_merge.merge_sboms(scan_id, sbom_data_list, scanner_names)
+        return merged_sbom
         
-        if "error" in merged_result:
-            raise HTTPException(status_code=400, detail=merged_result["error"])
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to merge SBOMs: {str(e)}")
+
+@router.post("/merge-sbom/{scan_id}")
+async def post_merge_sbom(
+    scan_id: str,
+    request_body: Dict[str, Any]
+):
+    """
+    Generate merged SBOM with specific unique packages selected by the user.
+    
+    Args:
+        scan_id: The scan identifier
+        request_body: JSON body with selected_unique_packages
+            {
+                "selected_unique_packages": {
+                    "scanner_name": [
+                        {"name": "pkg1", "version": "1.0.0"},
+                        {"name": "pkg2", "version": "2.0.0"}
+                    ]
+                }
+            }
+    """
+    try:
+        results = await sbom_service.get_scan_results(scan_id)
+        if not results:
+            raise HTTPException(status_code=404, detail="Scan not found")
         
-        return merged_result
+        selected_unique = request_body.get("selected_unique_packages", {})
+        
+        # Call merge service with specific package selections
+        merged_sbom = await sbom_service.get_merged_sbom_with_selections(
+            scan_id=scan_id,
+            selected_unique_packages=selected_unique
+        )
+        
+        if not merged_sbom:
+            raise HTTPException(status_code=400, detail="Failed to create merged SBOM")
+        
+        return merged_sbom
         
     except HTTPException:
         raise

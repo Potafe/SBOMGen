@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Merged SBOM - SBOM Collaborator</title>
+    <title>Merged SBOM - SBOM Generator</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -44,11 +44,24 @@
             font-size: 0.875rem;
             text-decoration: none;
             display: inline-block;
+            margin-right: 0.5rem;
+        }
+        .btn:hover {
+            background-color: #2563eb;
+        }
+        .btn-success {
+            background-color: #10b981;
+        }
+        .btn-success:hover {
+            background-color: #059669;
         }
         .btn-outline {
             background-color: transparent;
             color: #374151;
             border: 1px solid #d1d5db;
+        }
+        .btn-outline:hover {
+            background-color: #f3f4f6;
         }
         .code-block {
             background: #f9fafb;
@@ -72,97 +85,410 @@
             color: #dc2626;
         }
         .hidden { display: none; }
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #111827;
+        }
+        .scanner-section {
+            margin-bottom: 1.5rem;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 1rem;
+        }
+        .scanner-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+        .scanner-name {
+            font-weight: 600;
+            color: #374151;
+            text-transform: capitalize;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .badge-blue {
+            background-color: #dbeafe;
+            color: #1e40af;
+        }
+        .package-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            padding: 0.5rem;
+            background: #fafafa;
+        }
+        .package-item {
+            display: flex;
+            align-items: center;
+            padding: 0.5rem;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .package-item:last-child {
+            border-bottom: none;
+        }
+        .package-item label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            width: 100%;
+        }
+        .package-item input[type="checkbox"] {
+            margin-right: 0.5rem;
+        }
+        .package-name {
+            font-family: 'Monaco', monospace;
+            font-size: 0.813rem;
+        }
+        .action-package {
+            color: #dc2626;
+        }
+        .control-buttons {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-card {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 1rem;
+        }
+        .stat-label {
+            font-size: 0.875rem;
+            color: #6b7280;
+            margin-bottom: 0.25rem;
+        }
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #111827;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>Merged SBOM</h1>
+            <h1>Merged SBOM Configuration</h1>
             <div>
                 <a href="/static/repository-scanner.html" class="btn btn-outline">← Back to Scanner</a>
             </div>
         </div>
 
-        <div class="card">
-            <div id="loading" class="loading">
-                <p>Loading merged SBOM...</p>
-            </div>
+        <div id="loading" class="loading">
+            <p>Loading scan analysis...</p>
+        </div>
 
-            <div id="error" class="error hidden">
-                <p>Failed to load merged SBOM</p>
-            </div>
+        <div id="error" class="error hidden">
+            <p>Failed to load scan data</p>
+        </div>
 
-            <div id="content" class="hidden">
-                <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 1rem;">
-                    <h2 style="margin: 0;">Merged SBOM Data</h2>
-                    <button class="btn" onclick="downloadMergedSBOM()">📥 Download Merged SBOM</button>
-                </div>
+        <!-- Package Selection UI -->
+        <div id="packageSelection" class="hidden">
+            <div class="card">
+                <h2 class="section-title">Select Unique Packages to Include</h2>
                 
-                <div class="code-block" id="sbomContent">
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-label">Exact Matches</div>
+                        <div class="stat-value" id="exactCount">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Fuzzy Matches</div>
+                        <div class="stat-value" id="fuzzyCount">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Total Unique</div>
+                        <div class="stat-value" id="uniqueCount">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Selected</div>
+                        <div class="stat-value" id="selectedCount">0</div>
+                    </div>
+                </div>
+
+                <div class="control-buttons">
+                    <button class="btn" onclick="selectAll()">✓ Select All</button>
+                    <button class="btn" onclick="deselectAll()">✗ Deselect All</button>
+                    <button class="btn" onclick="filterGitHubActions()">🔍 Filter GitHub Actions</button>
+                    <button class="btn btn-success" onclick="generateMergedSBOM()">🔄 Generate Merged SBOM</button>
+                </div>
+
+                <div id="uniquePackagesList">
                     <!-- Will be populated by JavaScript -->
                 </div>
+            </div>
+        </div>
+
+        <!-- Merged SBOM Display -->
+        <div id="mergedSBOMDisplay" class="card hidden">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h2 style="margin: 0;">Merged SBOM Data</h2>
+                <div>
+                    <button class="btn btn-outline" onclick="showPackageSelection()">← Back to Selection</button>
+                    <button class="btn" onclick="downloadMergedSBOM()">📥 Download Merged SBOM</button>
+                </div>
+            </div>
+            
+            <div class="code-block" id="sbomContent">
+                <!-- Will be populated by JavaScript -->
             </div>
         </div>
     </div>
 
     <script>
         const API_BASE_URL = '/api/v1';
-        
-        // Get scan ID from URL parameters
         const urlParams = new URLSearchParams(window.location.search);
         const scanId = urlParams.get('scanId');
 
+        let analysisData = null;
+        let selectedPackages = {};
+        let cachedMergedSBOM = null;
+
         if (!scanId) {
-            document.getElementById('loading').classList.add('hidden');
-            document.getElementById('error').classList.remove('hidden');
-            document.getElementById('error').innerHTML = '<p>No scan ID provided</p>';
+            showError('No scan ID provided');
         } else {
-            loadMergedSBOM();
+            loadAnalysisData();
         }
 
-        async function loadMergedSBOM() {
+        async function loadAnalysisData() {
             try {
-                const response = await fetch(`${API_BASE_URL}/scan/merge-sbom/${scanId}`);
+                const response = await fetch(`${API_BASE_URL}/scan/scan-analysis/${scanId}`);
                 
                 if (!response.ok) {
-                    throw new Error('Failed to fetch merged SBOM');
+                    throw new Error('Failed to fetch analysis data');
                 }
                 
-                const mergedSbom = await response.json();
+                analysisData = await response.json();
+                
+                // Initialize selected packages (all selected by default)
+                for (const [scanner, packages] of Object.entries(analysisData.unique_packages || {})) {
+                    selectedPackages[scanner] = {};
+                    packages.forEach(pkg => {
+                        const key = `${pkg.name}@${pkg.version}`;
+                        selectedPackages[scanner][key] = true;
+                    });
+                }
                 
                 document.getElementById('loading').classList.add('hidden');
-                document.getElementById('content').classList.remove('hidden');
+                document.getElementById('packageSelection').classList.remove('hidden');
                 
-                // Display the merged SBOM as formatted JSON
-                document.getElementById('sbomContent').textContent = JSON.stringify(mergedSbom, null, 2);
+                displayPackageSelection();
+                updateStats();
                 
             } catch (error) {
-                console.error('Failed to fetch merged SBOM:', error);
-                document.getElementById('loading').classList.add('hidden');
-                document.getElementById('error').classList.remove('hidden');
-                document.getElementById('error').innerHTML = `<p>Error: ${error.message}</p>`;
+                console.error('Failed to load analysis:', error);
+                showError(`Error: ${error.message}`);
             }
+        }
+
+        function displayPackageSelection() {
+            const container = document.getElementById('uniquePackagesList');
+            container.innerHTML = '';
+            
+            const uniquePackages = analysisData.unique_packages || {};
+            
+            for (const [scanner, packages] of Object.entries(uniquePackages)) {
+                const section = document.createElement('div');
+                section.className = 'scanner-section';
+                
+                const header = document.createElement('div');
+                header.className = 'scanner-header';
+                header.innerHTML = `
+                    <span class="scanner-name">${scanner}</span>
+                    <span class="badge badge-blue">${packages.length} packages</span>
+                `;
+                
+                const packageList = document.createElement('div');
+                packageList.className = 'package-list';
+                
+                packages.forEach(pkg => {
+                    const key = `${pkg.name}@${pkg.version}`;
+                    const isGitHubAction = isGitHubActionPackage(pkg.name);
+                    
+                    const item = document.createElement('div');
+                    item.className = 'package-item';
+                    
+                    const label = document.createElement('label');
+                    label.innerHTML = `
+                        <input type="checkbox" 
+                               data-scanner="${scanner}" 
+                               data-key="${key}"
+                               ${selectedPackages[scanner][key] ? 'checked' : ''}
+                               onchange="togglePackage('${scanner}', '${key}')">
+                        <span class="package-name ${isGitHubAction ? 'action-package' : ''}">${key}</span>
+                    `;
+                    
+                    item.appendChild(label);
+                    packageList.appendChild(item);
+                });
+                
+                section.appendChild(header);
+                section.appendChild(packageList);
+                container.appendChild(section);
+            }
+        }
+
+        function togglePackage(scanner, key) {
+            selectedPackages[scanner][key] = !selectedPackages[scanner][key];
+            updateStats();
+        }
+
+        function selectAll() {
+            for (const scanner in selectedPackages) {
+                for (const key in selectedPackages[scanner]) {
+                    selectedPackages[scanner][key] = true;
+                }
+            }
+            updateCheckboxes();
+            updateStats();
+        }
+
+        function deselectAll() {
+            for (const scanner in selectedPackages) {
+                for (const key in selectedPackages[scanner]) {
+                    selectedPackages[scanner][key] = false;
+                }
+            }
+            updateCheckboxes();
+            updateStats();
+        }
+
+        function filterGitHubActions() {
+            for (const [scanner, packages] of Object.entries(analysisData.unique_packages || {})) {
+                packages.forEach(pkg => {
+                    const key = `${pkg.name}@${pkg.version}`;
+                    selectedPackages[scanner][key] = !isGitHubActionPackage(pkg.name);
+                });
+            }
+            updateCheckboxes();
+            updateStats();
+        }
+
+        function isGitHubActionPackage(name) {
+            const patterns = ['actions/', 'github/', '.github/', 'workflow/', 'action-'];
+            const nameLower = name.toLowerCase();
+            return patterns.some(pattern => nameLower.includes(pattern));
+        }
+
+        function updateCheckboxes() {
+            document.querySelectorAll('input[type="checkbox"][data-scanner]').forEach(cb => {
+                const scanner = cb.dataset.scanner;
+                const key = cb.dataset.key;
+                cb.checked = selectedPackages[scanner][key];
+            });
+        }
+
+        function updateStats() {
+            const exactCount = (analysisData.common_packages?.exact || []).length;
+            const fuzzyCount = (analysisData.fuzzy_matches?.fuzzy || []).length;
+            
+            let totalUnique = 0;
+            let totalSelected = 0;
+            
+            for (const scanner in selectedPackages) {
+                for (const key in selectedPackages[scanner]) {
+                    totalUnique++;
+                    if (selectedPackages[scanner][key]) {
+                        totalSelected++;
+                    }
+                }
+            }
+            
+            document.getElementById('exactCount').textContent = exactCount;
+            document.getElementById('fuzzyCount').textContent = fuzzyCount;
+            document.getElementById('uniqueCount').textContent = totalUnique;
+            document.getElementById('selectedCount').textContent = totalSelected;
+        }
+
+        async function generateMergedSBOM() {
+            try {
+                // Build list of selected unique packages
+                const selectedUniquePackages = {};
+                for (const [scanner, packages] of Object.entries(analysisData.unique_packages || {})) {
+                    selectedUniquePackages[scanner] = packages
+                        .filter(pkg => {
+                            const key = `${pkg.name}@${pkg.version}`;
+                            return selectedPackages[scanner][key];
+                        })
+                        .map(pkg => ({ name: pkg.name, version: pkg.version }));
+                }
+                
+                // Call backend with selected packages
+                const response = await fetch(`${API_BASE_URL}/scan/merge-sbom/${scanId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        selected_unique_packages: selectedUniquePackages
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to generate merged SBOM');
+                }
+                
+                cachedMergedSBOM = await response.json();
+                
+                // Display the merged SBOM
+                document.getElementById('packageSelection').classList.add('hidden');
+                document.getElementById('mergedSBOMDisplay').classList.remove('hidden');
+                document.getElementById('sbomContent').textContent = JSON.stringify(cachedMergedSBOM, null, 2);
+                
+            } catch (error) {
+                console.error('Failed to generate merged SBOM:', error);
+                alert(`Error: ${error.message}`);
+            }
+        }
+
+        function showPackageSelection() {
+            document.getElementById('mergedSBOMDisplay').classList.add('hidden');
+            document.getElementById('packageSelection').classList.remove('hidden');
         }
 
         async function downloadMergedSBOM() {
+            if (!cachedMergedSBOM) {
+                alert('Please generate the merged SBOM first');
+                return;
+            }
+            
             try {
-                const response = await fetch(`${API_BASE_URL}/scan/download-merged-sbom/${scanId}`);
-                
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.style.display = 'none';
-                    a.href = url;
-                    a.download = `merged-sbom-${scanId}.json`;
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    document.body.removeChild(a);
-                }
+                const blob = new Blob([JSON.stringify(cachedMergedSBOM, null, 2)], { type: 'application/json' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `merged-sbom-${scanId}.json`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
             } catch (error) {
                 console.error('Download failed:', error);
+                alert('Download failed');
             }
+        }
+
+        function showError(message) {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('error').classList.remove('hidden');
+            document.getElementById('error').innerHTML = `<p>${message}</p>`;
         }
     </script>
 </body>

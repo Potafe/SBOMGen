@@ -1,24 +1,30 @@
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
 from app.schemas.scan import ScannerType
+import json
 
 
 class PackageAnalyze:
     """
-    Simplified package analyzer - handles only extraction and graph generation.
+    Package analyzer - handles extraction of packages, dependencies, and graph generation.
     All comparison logic moved to DatabaseService for SQL-based analysis.
     """
     
-    def extract_packages(self, sbom_data: Dict, scanner: ScannerType) -> List[Dict[str, str]]:
+    def extract_packages(self, sbom_data: Dict, scanner: ScannerType) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
         """
-        Extract package data with name, version, purl, and cpe from SBOM data.
-        Does NOT deduplicate - returns all packages as-is from the scanner.
+        Extract package data and dependencies from CycloneDX SBOM.
+        Returns: (packages_list, dependencies_list)
         """
         packages = []
+        dependencies = []
+        
+        # Extract components
         for component in sbom_data.get("components", []):
             name = component.get("name", "").strip()
             version = component.get("version", "").strip()
             purl = component.get("purl", "").strip()
+            bom_ref = component.get("bom-ref", purl or f"{name}@{version}").strip()
             
+            # Extract CPE
             cpe = ""
             if "cpe" in component:
                 cpe = component["cpe"].strip()
@@ -28,30 +34,63 @@ class PackageAnalyze:
                         cpe = ref.get("url", "").strip()
                         break
             
+            # Extract licenses
+            licenses = []
+            for lic in component.get("licenses", []):
+                if "license" in lic:
+                    if "id" in lic["license"]:
+                        licenses.append(lic["license"]["id"])
+                    elif "name" in lic["license"]:
+                        licenses.append(lic["license"]["name"])
+            
             if name:
                 packages.append({
                     "name": name,
                     "version": version,
                     "purl": purl,
-                    "cpe": cpe
+                    "cpe": cpe,
+                    "original_ref": bom_ref,
+                    "licenses": json.dumps(licenses) if licenses else "",
+                    "component_type": component.get("type", "library"),
+                    "description": component.get("description", "").strip()
                 })
         
-        return packages
+        # Extract dependencies
+        for dep in sbom_data.get("dependencies", []):
+            parent_ref = dep.get("ref", "").strip()
+            if not parent_ref:
+                continue
+            
+            for child_ref in dep.get("dependsOn", []):
+                if child_ref:
+                    dependencies.append({
+                        "parent_ref": parent_ref,
+                        "child_ref": child_ref,
+                        "original_type": "DEPENDS_ON",
+                        "normalized_type": "functional"
+                    })
+        
+        return packages, dependencies
     
-    def extract_spdx_packages(self, spdx_data: Dict, scanner: ScannerType) -> List[Dict[str, str]]:
+    def extract_spdx_packages(self, spdx_data: Dict, scanner: ScannerType) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
         """
-        Extract package data from SPDX format SBOM.
+        Extract package data and relationships from SPDX format SBOM.
         Supports SPDX 2.x format (including 2.3 from GitHub).
-        Does NOT deduplicate - returns all packages as-is.
+        Returns: (packages_list, dependencies_list)
         """
         packages = []
+        dependencies = []
+        
+        # Map SPDXID to package for relationship resolution
+        spdxid_map = {}
         
         # SPDX stores packages in the "packages" array
         for package in spdx_data.get("packages", []):
             name = package.get("name", "").strip()
             version = package.get("versionInfo", "").strip()
+            spdx_id = package.get("SPDXID", "").strip()
             
-            # Extract PURL if available in externalRefs
+            # Extract PURL and CPE from externalRefs
             purl = ""
             cpe = ""
             for ref in package.get("externalRefs", []):
@@ -61,15 +100,64 @@ class PackageAnalyze:
                 elif ref_type in ["cpe22Type", "cpe23Type"]:
                     cpe = ref.get("referenceLocator", "").strip()
             
+            # Extract licenses
+            licenses = []
+            concluded_license = package.get("licenseConcluded", "")
+            if concluded_license and concluded_license != "NOASSERTION":
+                licenses.append(concluded_license)
+            declared_license = package.get("licenseDeclared", "")
+            if declared_license and declared_license != "NOASSERTION" and declared_license not in licenses:
+                licenses.append(declared_license)
+            
             if name:
-                packages.append({
+                pkg_data = {
                     "name": name,
                     "version": version,
                     "purl": purl,
-                    "cpe": cpe
-                })
+                    "cpe": cpe,
+                    "original_ref": spdx_id,
+                    "licenses": json.dumps(licenses) if licenses else "",
+                    "component_type": "library",
+                    "description": package.get("description", "").strip()
+                }
+                packages.append(pkg_data)
+                spdxid_map[spdx_id] = pkg_data
         
-        return packages
+        # Extract relationships
+        for rel in spdx_data.get("relationships", []):
+            rel_type = rel.get("relationshipType", "").strip()
+            spdx_element = rel.get("spdxElementId", "").strip()
+            related_element = rel.get("relatedSpdxElement", "").strip()
+            
+            # Map SPDX relationship types to normalized types
+            normalized_type = self._normalize_spdx_relationship(rel_type)
+            
+            if normalized_type and spdx_element and related_element:
+                # For DEPENDS_ON, parent depends on child
+                if rel_type in ["DEPENDS_ON", "DEPENDENCY_OF", "RUNTIME_DEPENDENCY_OF", "BUILD_DEPENDENCY_OF", "DEV_DEPENDENCY_OF"]:
+                    dependencies.append({
+                        "parent_ref": spdx_element,
+                        "child_ref": related_element,
+                        "original_type": rel_type,
+                        "normalized_type": normalized_type
+                    })
+        
+        return packages, dependencies
+    
+    def _normalize_spdx_relationship(self, rel_type: str) -> str:
+        """Normalize SPDX relationship types to simplified categories."""
+        rel_type = rel_type.upper()
+        
+        if rel_type in ["DEPENDS_ON", "DEPENDENCY_OF", "RUNTIME_DEPENDENCY_OF"]:
+            return "functional"
+        elif rel_type in ["BUILD_DEPENDENCY_OF", "BUILD_TOOL_OF"]:
+            return "build"
+        elif rel_type in ["DEV_DEPENDENCY_OF", "TEST_DEPENDENCY_OF", "TEST_TOOL_OF"]:
+            return "dev"
+        elif rel_type in ["OPTIONAL_DEPENDENCY_OF"]:
+            return "optional"
+        else:
+            return ""
     
     def parse_sbom_graph(self, sbom_data: Dict) -> Dict[str, Any]:
         """Parse CycloneDX SBOM to extract graph data for visualization."""

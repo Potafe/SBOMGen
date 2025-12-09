@@ -9,7 +9,7 @@ from sqlalchemy import select
 import logging
 
 from app.database import AsyncSessionLocal, ScanResultsDB, UploadedScanResultsDB
-from app.database.models import Package
+from app.database.models import Package, Dependency
 from app.schemas.scan import ScanResults, ScanStatus, SBOMResult, ScannerType, UploadedScanResults
 from sqlalchemy import text, func
 
@@ -283,20 +283,26 @@ class DatabaseService:
             logger.error(f"Error getting uploaded scan results {scan_id}: {e}")
             return None
     
-    async def save_packages(self, scan_id: str, scanner_name: str, packages: List[Dict[str, str]]) -> bool:
+    async def save_packages(self, scan_id: str, scanner_name: str, packages: List[Dict[str, Any]]) -> bool:
         """
         Bulk insert packages for a specific scan and scanner.
-        Does NOT deduplicate - saves all packages as-is.
+        Now includes additional metadata fields.
         """
         try:
             async with AsyncSessionLocal() as session:
-                # First, delete any existing packages for this scan_id and scanner
+                # First, delete dependencies (to avoid foreign key constraint violation)
+                await session.execute(
+                    text("DELETE FROM dependencies WHERE scan_id = :scan_id AND scanner_name = :scanner_name"),
+                    {"scan_id": scan_id, "scanner_name": scanner_name}
+                )
+                
+                # Then, delete any existing packages for this scan_id and scanner
                 await session.execute(
                     text("DELETE FROM packages WHERE scan_id = :scan_id AND scanner_name = :scanner_name"),
                     {"scan_id": scan_id, "scanner_name": scanner_name}
                 )
                 
-                # Bulk insert new packages
+                # Bulk insert new packages with enhanced fields
                 package_objects = [
                     Package(
                         scan_id=scan_id,
@@ -304,7 +310,12 @@ class DatabaseService:
                         name=pkg["name"],
                         version=pkg["version"],
                         purl=pkg.get("purl", ""),
-                        cpe=pkg.get("cpe", "")
+                        cpe=pkg.get("cpe", ""),
+                        original_ref=pkg.get("original_ref", pkg.get("purl", f"{pkg['name']}@{pkg['version']}")),
+                        licenses=pkg.get("licenses", ""),
+                        component_type=pkg.get("component_type", "library"),
+                        description=pkg.get("description", ""),
+                        match_status="unique"  # Default, will be updated during merge
                     )
                     for pkg in packages
                 ]
@@ -316,6 +327,63 @@ class DatabaseService:
                 return True
         except Exception as e:
             logger.error(f"Error saving packages for scan {scan_id}, scanner {scanner_name}: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return False
+    
+    async def save_dependencies(self, scan_id: str, scanner_name: str, dependencies: List[Dict[str, str]]) -> bool:
+        """
+        Save dependencies for a specific scan and scanner.
+        Links packages using their original_ref values.
+        """
+        try:
+            async with AsyncSessionLocal() as session:
+                
+                
+                # First, delete existing dependencies for this scan_id and scanner
+                await session.execute(
+                    text("DELETE FROM dependencies WHERE scan_id = :scan_id AND scanner_name = :scanner_name"),
+                    {"scan_id": scan_id, "scanner_name": scanner_name}
+                )
+                
+                if not dependencies:
+                    logger.info(f"No dependencies to save for scan {scan_id}, scanner {scanner_name}")
+                    return True
+                
+                # Get package ID mapping for this scan and scanner
+                result = await session.execute(
+                    text("""
+                        SELECT id, original_ref 
+                        FROM packages 
+                        WHERE scan_id = :scan_id AND scanner_name = :scanner_name
+                    """),
+                    {"scan_id": scan_id, "scanner_name": scanner_name}
+                )
+                ref_to_id = {row.original_ref: row.id for row in result.fetchall()}
+                
+                # Create dependency objects
+                dependency_objects = []
+                for dep in dependencies:
+                    parent_id = ref_to_id.get(dep["parent_ref"])
+                    child_id = ref_to_id.get(dep["child_ref"])
+                    
+                    if parent_id and child_id:
+                        dependency_objects.append(Dependency(
+                            scan_id=scan_id,
+                            scanner_name=scanner_name,
+                            parent_id=parent_id,
+                            child_id=child_id,
+                            original_type=dep["original_type"],
+                            normalized_type=dep["normalized_type"]
+                        ))
+                
+                session.add_all(dependency_objects)
+                await session.commit()
+                
+                logger.info(f"Saved {len(dependency_objects)} dependencies for scan {scan_id}, scanner {scanner_name}")
+                return True
+        except Exception as e:
+            logger.error(f"Error saving dependencies for scan {scan_id}, scanner {scanner_name}: {e}")
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return False
@@ -664,6 +732,153 @@ class DatabaseService:
                 "scores": {},
                 "error": str(e)
             }
+    
+    async def update_match_status(self, scan_id: str) -> bool:
+        """
+        Update match_status for all packages in a scan based on analysis.
+        Sets status to 'exact', 'fuzzy', or 'unique'.
+        """
+        try:
+            async with AsyncSessionLocal() as session:
+                # Get exact matches
+                exact_matches = await self.find_exact_matches(scan_id)
+                
+                # Update all to unique first
+                await session.execute(
+                    text("UPDATE packages SET match_status = 'unique' WHERE scan_id = :scan_id"),
+                    {"scan_id": scan_id}
+                )
+                
+                # Mark exact matches
+                for match in exact_matches.get("exact", []):
+                    name = match["name"]
+                    version = match["version"]
+                    await session.execute(
+                        text("""
+                            UPDATE packages 
+                            SET match_status = 'exact' 
+                            WHERE scan_id = :scan_id AND name = :name AND version = :version
+                        """),
+                        {"scan_id": scan_id, "name": name, "version": version}
+                    )
+                
+                # Mark fuzzy matches
+                fuzzy_matches = await self.find_fuzzy_matches(scan_id)
+                for match in fuzzy_matches.get("fuzzy", []):
+                    # Update the fuzzy matched packages
+                    await session.execute(
+                        text("""
+                            UPDATE packages 
+                            SET match_status = 'fuzzy' 
+                            WHERE scan_id = :scan_id 
+                            AND scanner_name = :scanner1 
+                            AND name = :name1 
+                            AND version = :version1
+                        """),
+                        {
+                            "scan_id": scan_id,
+                            "scanner1": match["scanner"],
+                            "name1": match["name"],
+                            "version1": match["version"]
+                        }
+                    )
+                    
+                    similar = match.get("similar_to", {})
+                    if similar:
+                        await session.execute(
+                            text("""
+                                UPDATE packages 
+                                SET match_status = 'fuzzy' 
+                                WHERE scan_id = :scan_id 
+                                AND scanner_name = :scanner2 
+                                AND name = :name2 
+                                AND version = :version2
+                            """),
+                            {
+                                "scan_id": scan_id,
+                                "scanner2": similar.get("scanner"),
+                                "name2": similar.get("name"),
+                                "version2": similar.get("version")
+                            }
+                        )
+                
+                await session.commit()
+                logger.info(f"Updated match status for scan {scan_id}")
+                return True
+        except Exception as e:
+            logger.error(f"Error updating match status for scan {scan_id}: {e}")
+            return False
+    
+    async def merge_sboms(self, scan_id: str, include_all_unique: bool = True, 
+                         exclude_github_actions: bool = False) -> Dict[str, Any]:
+        """
+        Create a merged SBOM from all scanner results.
+        Delegates to SBOMMerge service for the actual merge logic.
+        
+        Args:
+            scan_id: The scan identifier
+            include_all_unique: Whether to include all unique packages
+            exclude_github_actions: Whether to exclude GitHub Actions packages
+            
+        Returns:
+            Dict containing the merged SBOM in CycloneDX format
+        """
+        try:
+            from app.services.sbom_merge import SBOMMerge
+            
+            merger = SBOMMerge()
+            merged_sbom = await merger.merge_sboms(
+                scan_id=scan_id,
+                include_all_unique=include_all_unique,
+                exclude_github_actions=exclude_github_actions
+            )
+            
+            if "error" in merged_sbom:
+                logger.error(f"Merge failed for scan {scan_id}: {merged_sbom['error']}")
+                return {}
+            
+            logger.info(f"Successfully merged SBOM for scan {scan_id}")
+            return merged_sbom
+            
+        except Exception as e:
+            logger.error(f"Error merging SBOMs for scan {scan_id}: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return {}
+    
+    async def merge_sboms_with_selections(self, scan_id: str, 
+                                         selected_unique_packages: Dict[str, list]) -> Dict[str, Any]:
+        """
+        Create a merged SBOM with specific unique packages selected by the user.
+        
+        Args:
+            scan_id: The scan identifier
+            selected_unique_packages: Dict mapping scanner names to lists of selected packages
+            
+        Returns:
+            Dict containing the merged SBOM in CycloneDX format
+        """
+        try:
+            from app.services.sbom_merge import SBOMMerge
+            
+            merger = SBOMMerge()
+            merged_sbom = await merger.merge_sboms_with_selections(
+                scan_id=scan_id,
+                selected_unique_packages=selected_unique_packages
+            )
+            
+            if "error" in merged_sbom:
+                logger.error(f"Merge failed for scan {scan_id}: {merged_sbom['error']}")
+                return {}
+            
+            logger.info(f"Successfully merged SBOM with selections for scan {scan_id}")
+            return merged_sbom
+            
+        except Exception as e:
+            logger.error(f"Error merging SBOMs with selections for scan {scan_id}: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return {}
 
 # Global database service instance
 db_service = DatabaseService()

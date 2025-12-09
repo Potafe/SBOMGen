@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI):
     # Shutdown (nothing to do for now)
 
 app = FastAPI(
-    title="SBOM Collaborator Beta",
+    title="SBOM Generator Beta",
     description="API for generating SBOM using trivy, syft, cdxgen, ghas, blackduck",
     version="0.0.1",
     lifespan=lifespan
