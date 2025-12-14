@@ -1,23 +1,14 @@
-FROM python:3.11
+# ---------- Base layer with scanners ----------
+FROM yazat/scanners:latest AS base
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
-    git \
-    wget \
-    curl \
-    lsb-release \
-    gnupg \
-    nodejs \
-    npm \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY docker/install_scanners.sh .
-RUN chmod +x install_scanners.sh && sed -i 's/\r$//' install_scanners.sh && ./install_scanners.sh
-
+# ---------- Python dependencies ----------
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
+# ---------- Application layer ----------
 COPY app/ ./app/
 COPY static/ ./static/
 

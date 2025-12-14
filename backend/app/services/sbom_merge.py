@@ -289,8 +289,10 @@ class SBOMMerge:
                     
                     # Step 1: Always include exact matches
                     if pkg.match_status == "exact":
-                        # Skip GitHub Actions packages (unsupported by analyzers)
+                        # Skip GitHub Actions, lockfiles, and temp paths
                         if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
+                            continue
+                        if self._is_github_action_package(pkg.name):
                             continue
                         seen_packages.add(pkg_key)
                         component = self._build_component(pkg)
@@ -306,8 +308,10 @@ class SBOMMerge:
                     # Step 2: Include fuzzy matches (higher occurrence = more likely to be correct)
                     if pkg.match_status == "fuzzy":
                         if pkg.occurrence_count >= 2:  # Found by at least 2 scanners
-                            # Skip GitHub Actions packages (unsupported by analyzers)
+                            # Skip GitHub Actions, lockfiles, and temp paths
                             if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
+                                continue
+                            if self._is_github_action_package(pkg.name):
                                 continue
                             seen_packages.add(pkg_key)
                             component = self._build_component(pkg)
@@ -322,15 +326,14 @@ class SBOMMerge:
                     
                     # Step 3: Handle unique packages based on options
                     if pkg.match_status == "unique":
-                        # Option to exclude GitHub Actions packages
-                        if exclude_github_actions and self._is_github_action_package(pkg.name):
+                        # Always exclude lockfiles, temp paths, and GitHub Actions
+                        if self._is_github_action_package(pkg.name):
+                            continue
+                        if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
                             continue
                         
                         # Include all unique packages if option is set
                         if include_all_unique:
-                            # Skip GitHub Actions packages (unsupported by analyzers)
-                            if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
-                                continue
                             seen_packages.add(pkg_key)
                             component = self._build_component(pkg)
                             merged_components.append(component)
@@ -552,8 +555,10 @@ class SBOMMerge:
                     
                     # Always include exact matches
                     if pkg.match_status == "exact":
-                        # Skip GitHub Actions packages (unsupported by analyzers)
+                        # Skip GitHub Actions, lockfiles, and temp paths
                         if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
+                            continue
+                        if self._is_github_action_package(pkg.name):
                             continue
                         seen_packages.add(pkg_key)
                         component = self._build_component(pkg)
@@ -569,8 +574,10 @@ class SBOMMerge:
                     # Include fuzzy matches (higher occurrence = more likely correct)
                     if pkg.match_status == "fuzzy":
                         if pkg.occurrence_count >= 2:
-                            # Skip GitHub Actions packages (unsupported by analyzers)
+                            # Skip GitHub Actions, lockfiles, and temp paths
                             if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
+                                continue
+                            if self._is_github_action_package(pkg.name):
                                 continue
                             seen_packages.add(pkg_key)
                             component = self._build_component(pkg)
@@ -585,11 +592,14 @@ class SBOMMerge:
                     
                     # Only include unique packages if user selected them
                     if pkg.match_status == "unique":
+                        # Always exclude lockfiles, temp paths, and GitHub Actions
+                        if self._is_github_action_package(pkg.name):
+                            continue
+                        if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
+                            continue
+                        
                         selection_key = (pkg.scanner_name, pkg.name, pkg.version)
                         if selection_key in selected_pkg_keys:
-                            # Skip GitHub Actions packages (unsupported by analyzers)
-                            if pkg.purl and 'pkg:githubactions' in pkg.purl.lower():
-                                continue
                             seen_packages.add(pkg_key)
                             component = self._build_component(pkg)
                             merged_components.append(component)
@@ -746,11 +756,22 @@ class SBOMMerge:
                     # Validate and filter licenses
                     valid_licenses = []
                     for lic in licenses_list:
-                        if self._is_valid_spdx_license(lic):
-                            valid_licenses.append({"license": {"id": lic}})
+                        # Skip empty or whitespace-only licenses
+                        if not lic or not lic.strip():
+                            continue
+                        
+                        # Clean the license string (remove newlines, extra spaces)
+                        lic_clean = ' '.join(lic.split())
+                        
+                        # Check if this is a license expression (contains AND/OR operators)
+                        if " AND " in lic_clean or " OR " in lic_clean or " WITH " in lic_clean:
+                            # Expression goes at top level, NOT inside "license" wrapper
+                            valid_licenses.append({"expression": lic_clean})
+                        elif self._is_valid_spdx_license(lic_clean):
+                            valid_licenses.append({"license": {"id": lic_clean}})
                         else:
                             # Use license name instead of id for non-SPDX licenses
-                            valid_licenses.append({"license": {"name": lic}})
+                            valid_licenses.append({"license": {"name": lic_clean}})
                     
                     if valid_licenses:
                         component["licenses"] = valid_licenses
@@ -777,10 +798,16 @@ class SBOMMerge:
     
     def _is_valid_spdx_license(self, license_id: str) -> bool:
         """
-        Check if a license identifier is a valid SPDX license.
-        Returns True if valid, False otherwise.
+        Check if a license identifier is a valid SPDX license ID.
+        Returns True only for official SPDX IDs (NOT LicenseRef-*).
+        LicenseRef-* licenses should use 'name' field, not 'id'.
         """
         if not license_id:
+            return False
+        
+        # LicenseRef-* are NOT valid for license.id field in CycloneDX
+        # They must go in license.name or as an expression
+        if license_id.startswith("LicenseRef-"):
             return False
         
         # Check against known SPDX licenses
@@ -789,12 +816,14 @@ class SBOMMerge:
         
         return (
             license_id in self.valid_spdx_licenses or 
-            base_license in self.valid_spdx_licenses or
-            license_id.startswith("LicenseRef-")  # Custom license references are valid
+            base_license in self.valid_spdx_licenses
         )
     
     def _is_github_action_package(self, package_name: str = None, package_dict: dict = None) -> bool:
-        """Check if a package is a GitHub Actions workflow package."""
+        """
+        Check if a package should be excluded from the merged SBOM.
+        This includes GitHub Actions, lockfiles, temp paths, and invalid components.
+        """
         # Check by purl if package dict is provided
         if package_dict:
             purl = package_dict.get('purl', '')
@@ -804,20 +833,65 @@ class SBOMMerge:
         
         if not package_name:
             return False
-            
+        
+        package_lower = package_name.lower()
+        
+        # Filter out lockfiles and configuration files (not actual components)
+        # These patterns must match the filename part
+        lockfile_patterns = [
+            "packages.lock.json",
+            "pnpm-lock.yaml",
+            "package-lock.json",
+            "yarn.lock",
+            "composer.lock",
+            "gemfile.lock",
+            "go.mod",
+            "go.sum",
+            "cargo.lock",
+            "pipfile.lock",
+            "poetry.lock",
+            ".csproj",
+            ".fsproj",
+            ".vbproj",
+            ".sln",
+            "pom.xml",
+        ]
+        
+        # Filter out temp directory paths - match at start or with path separator
+        # This catches: /app/temp/*, \app\temp\*, /tmp/*, etc.
+        if package_lower.startswith("/app/temp/") or package_lower.startswith("\\app\\temp\\"):
+            return True
+        if package_lower.startswith("/tmp/") or package_lower.startswith("\\tmp\\"):
+            return True
+        if package_lower.startswith("app/temp/") or package_lower.startswith("app\\temp\\"):
+            return True
+        
+        # Filter out GitHub Actions and workflow packages
         github_action_patterns = [
             "actions/",
             "github/",
             ".github/",
             "workflow/",
             "action-",
-            "/app/temp",
-            "app/temp",
-            "temp",
-            ".yaml",
-            "setup",
-            "com.github",
-
+            "setup-",
         ]
-        package_lower = package_name.lower()
-        return any(pattern in package_lower for pattern in github_action_patterns)
+        
+        # Filter out files ending with @ (invalid hash marker)
+        if package_name.endswith("@"):
+            return True
+        
+        # Check lockfiles - must be exact filename match or end with these
+        for pattern in lockfile_patterns:
+            # Check if it's the exact filename or ends with it (with path separator)
+            if package_lower.endswith(pattern) or package_lower.endswith(pattern + "@"):
+                return True
+            # Check for path separator before pattern
+            if f"/{pattern}" in package_lower or f"\\{pattern}" in package_lower:
+                return True
+        
+        # Check GitHub Actions patterns
+        for pattern in github_action_patterns:
+            if pattern in package_lower:
+                return True
+        
+        return False

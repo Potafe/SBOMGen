@@ -1,0 +1,20 @@
+# ---------- Scanner base image ----------
+FROM python:3.11-slim AS scanners
+
+# Install system dependencies for scanners
+RUN apt-get update && apt-get install -y \
+    git \
+    wget \
+    curl \
+    lsb-release \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install scanners
+COPY docker/install_scanners.sh /app/install_scanners.sh
+RUN chmod +x /app/install_scanners.sh \
+    && sed -i 's/\r$//' /app/install_scanners.sh \
+    && /app/install_scanners.sh \
+    && rm -f /app/install_scanners.sh

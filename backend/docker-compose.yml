@@ -14,19 +14,30 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  scanners:
+    build:
+      context: .
+      dockerfile: Dockerfile.scanners
+    image: yazat/scanners:latest
+
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: yazat/sbomgen:latest
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+      scanners:
+        condition: service_completed_successfully
     environment:
       - DATABASE_URL=postgresql+psycopg://postgres:sbomgen_password@postgres:5432/sbomgen
     volumes:
       - ./temp:/app/temp
       - ./results:/app/results
-      - ./logs:/app/logs
       - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
