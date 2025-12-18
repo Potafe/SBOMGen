@@ -15,6 +15,7 @@ from app.schemas.scan import (
 )
 from app.services.sbom_service import SBOMService
 from app.services.sbom_merge import SBOMMerge
+from app.services.cpe_service import cpe_service
 from app.core.config import settings
 
 router = APIRouter()
@@ -370,3 +371,50 @@ async def get_uploaded_sbom_results(scan_id: str):
         return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve uploaded SBOM results: {str(e)}")
+
+@router.post("/validate-cpes")
+async def validate_cpes(request_body: Dict[str, Any]):
+    """
+    Validate CPEs for components in a merged SBOM.
+    
+    Args:
+        request_body: JSON body with cpes list
+            {
+                "cpes": ["cpe:2.3:a:vendor:product:version:...", ...]
+            }
+    
+    Returns:
+        Dict mapping CPE to validation status
+    """
+    try:
+        cpes = request_body.get("cpes", [])
+        if not cpes:
+            return {"results": {}}
+        
+        results = await cpe_service.verify_cpes_batch(cpes)
+        return {"results": results}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to validate CPEs: {str(e)}")
+
+@router.get("/cpe-stats")
+async def get_cpe_stats():
+    """
+    Check NVD CPE API availability and configuration.
+    """
+    try:
+        # Test API with a known CPE
+        test_cpe = "cpe:2.3:a:microsoft:windows:10:*:*:*:*:*:*:*"
+        is_valid = await cpe_service.verify_cpe(test_cpe)
+        
+        return {
+            "api_available": True,
+            "test_validation": is_valid,
+            "base_url": cpe_service.base_url,
+            "rate_limit": f"{cpe_service.max_requests_per_30_seconds} requests per 30 seconds"
+        }
+    except Exception as e:
+        return {
+            "api_available": False,
+            "error": str(e)
+        }

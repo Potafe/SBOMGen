@@ -21,6 +21,7 @@ class ScanResultsDB(Base):
     bd_sbom = Column(JSONB)
     uploaded_sbom = Column(JSONB)
     merged_sbom = Column(JSONB)
+    cached_analysis = Column(JSONB)  # Cache for analysis results
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True))
     

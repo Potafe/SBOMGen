@@ -50,6 +50,7 @@ class ScanResults(BaseModel):
     bd_sbom: Optional[SBOMResult] = None
     tech_stack: Optional[List[str]] = None
     uploaded_sbom: Optional[SBOMResult] = None
+    cached_analysis: Optional[Dict[str, Any]] = None
 
 class RerunRequest(BaseModel):
     scan_id: str

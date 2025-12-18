@@ -342,10 +342,14 @@ class SBOMService:
         
         return None
     
-    async def get_scan_analysis(self, scan_id: str) -> Dict:
+    async def get_scan_analysis(self, scan_id: str, use_cache: bool = True) -> Dict:
         """
         Get analysis data for a scan.
-        Now uses SQL-based analysis from DatabaseService for optimal performance.
+        Now uses SQL-based analysis from DatabaseService with intelligent caching.
+        
+        Args:
+            scan_id: The scan identifier
+            use_cache: Whether to use cached analysis if available (default: True)
         """
         try:
             # Check if this is an uploaded scan
@@ -373,8 +377,8 @@ class SBOMService:
             if not results:
                 return {"error": "Scan not found"}
             
-            # Get comprehensive analysis from database
-            analysis = await db_service.analyze_scan_packages(scan_id)
+            # Get comprehensive analysis from database (with caching)
+            analysis = await db_service.analyze_scan_packages(scan_id, use_cache=use_cache)
             
             # Add tech stack info
             analysis["tech_stack"] = results.tech_stack

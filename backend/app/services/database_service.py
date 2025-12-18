@@ -78,6 +78,10 @@ class DatabaseService:
                         "error": scan_results.uploaded_sbom.error
                     }
                 
+                cached_analysis_json = None
+                if hasattr(scan_results, 'cached_analysis') and scan_results.cached_analysis:
+                    cached_analysis_json = scan_results.cached_analysis
+                
                 db_scan = ScanResultsDB(
                     scan_id=scan_results.scan_id,
                     status=scan_results.status.value,
@@ -89,6 +93,7 @@ class DatabaseService:
                     ghas_sbom=ghas_sbom_json,
                     bd_sbom=bd_sbom_json,
                     uploaded_sbom=uploaded_sbom_json,
+                    cached_analysis=cached_analysis_json,
                     created_at=scan_results.created_at,
                     completed_at=scan_results.completed_at
                 )
@@ -110,6 +115,7 @@ class DatabaseService:
                     existing_scan.ghas_sbom = ghas_sbom_json
                     existing_scan.bd_sbom = bd_sbom_json
                     existing_scan.uploaded_sbom = uploaded_sbom_json
+                    existing_scan.cached_analysis = cached_analysis_json
                     existing_scan.completed_at = scan_results.completed_at
                 else:
                     # Add new record
@@ -144,7 +150,8 @@ class DatabaseService:
                     repo_url=db_scan.repo_url,
                     tech_stack=db_scan.tech_stack,
                     created_at=db_scan.created_at,
-                    completed_at=db_scan.completed_at
+                    completed_at=db_scan.completed_at,
+                    cached_analysis=db_scan.cached_analysis
                 )
                 
                 # Convert JSON back to SBOMResult objects
@@ -681,12 +688,32 @@ class DatabaseService:
             logger.error(f"Error getting package counts for scan {scan_id}: {e}")
             return {}
     
-    async def analyze_scan_packages(self, scan_id: str) -> Dict[str, Any]:
+    async def analyze_scan_packages(self, scan_id: str, use_cache: bool = True) -> Dict[str, Any]:
         """
         Complete analysis of packages for a scan.
         Finds exact matches, fuzzy matches, unique packages, and calculates scores.
+        Results are cached in the database for subsequent calls.
+        
+        Args:
+            scan_id: The scan identifier
+            use_cache: Whether to use cached results if available (default: True)
         """
         try:
+            # Check for cached analysis first
+            if use_cache:
+                async with AsyncSessionLocal() as session:
+                    result = await session.execute(
+                        select(ScanResultsDB).where(ScanResultsDB.scan_id == scan_id)
+                    )
+                    db_scan = result.scalar_one_or_none()
+                    
+                    if db_scan and db_scan.cached_analysis:
+                        logger.info(f"Using cached analysis for scan {scan_id}")
+                        return db_scan.cached_analysis
+            
+            # If no cache or use_cache=False, perform analysis
+            logger.info(f"Computing fresh analysis for scan {scan_id}")
+            
             # Get all analysis data in parallel
             exact_matches = await self.find_exact_matches(scan_id)
             fuzzy_matches = await self.find_fuzzy_matches(scan_id)
@@ -714,13 +741,19 @@ class DatabaseService:
                 unique_ratio = unique_count / unique_pkg_count
                 scores[scanner] = max(0, common_ratio * 100 - unique_ratio * 10)
             
-            return {
+            analysis_result = {
                 "common_packages": exact_matches,
                 "fuzzy_matches": fuzzy_matches,
                 "unique_packages": unique_packages,
                 "total_counts": total_counts,
                 "scores": scores
             }
+            
+            # Cache the analysis result
+            await self.cache_analysis(scan_id, analysis_result)
+            
+            return analysis_result
+            
         except Exception as e:
             logger.error(f"Error analyzing scan packages {scan_id}: {e}")
             import traceback
@@ -733,6 +766,60 @@ class DatabaseService:
                 "scores": {},
                 "error": str(e)
             }
+    
+    async def cache_analysis(self, scan_id: str, analysis_data: Dict[str, Any]) -> bool:
+        """
+        Cache analysis results in the database.
+        
+        Args:
+            scan_id: The scan identifier
+            analysis_data: The analysis results to cache
+        """
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(ScanResultsDB).where(ScanResultsDB.scan_id == scan_id)
+                )
+                db_scan = result.scalar_one_or_none()
+                
+                if db_scan:
+                    db_scan.cached_analysis = analysis_data
+                    await session.commit()
+                    logger.info(f"Cached analysis results for scan {scan_id}")
+                    return True
+                else:
+                    logger.warning(f"Scan {scan_id} not found, cannot cache analysis")
+                    return False
+        except Exception as e:
+            logger.error(f"Error caching analysis for scan {scan_id}: {e}")
+            return False
+    
+    async def invalidate_analysis_cache(self, scan_id: str) -> bool:
+        """
+        Invalidate (clear) cached analysis for a scan.
+        Should be called when packages or dependencies are modified.
+        
+        Args:
+            scan_id: The scan identifier
+        """
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(ScanResultsDB).where(ScanResultsDB.scan_id == scan_id)
+                )
+                db_scan = result.scalar_one_or_none()
+                
+                if db_scan:
+                    db_scan.cached_analysis = None
+                    await session.commit()
+                    logger.info(f"Invalidated analysis cache for scan {scan_id}")
+                    return True
+                else:
+                    logger.warning(f"Scan {scan_id} not found, cannot invalidate cache")
+                    return False
+        except Exception as e:
+            logger.error(f"Error invalidating analysis cache for scan {scan_id}: {e}")
+            return False
     
     async def update_match_status(self, scan_id: str) -> bool:
         """
