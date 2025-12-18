@@ -60,18 +60,100 @@
             </div>
         </div>
 
-        <!-- Merged SBOM Display -->
+        <!-- Merged SBOM Display with Validation Flow -->
         <div id="mergedSBOMDisplay" class="card hidden">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <h2 style="margin: 0;">Merged SBOM Data</h2>
-                <div>
-                    <button class="btn btn-outline" onclick="showPackageSelection()">← Back to Selection</button>
-                    <button class="btn" onclick="downloadMergedSBOM()">📥 Download Merged SBOM</button>
+            <!-- Tab Navigation -->
+            <div class="tab-nav">
+                <button class="tab-btn active" onclick="showTab('sbomView')">📄 View SBOM</button>
+                <button class="tab-btn" onclick="showTab('cpeValidation')">🔍 Validate CPEs</button>
+                <button class="tab-btn" onclick="showTab('purlValidation')">🔍 Validate PURLs</button>
+            </div>
+
+            <!-- SBOM View Tab -->
+            <div id="sbomView" class="tab-content active">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2 style="margin: 0;">Merged SBOM Data</h2>
+                    <div>
+                        <button class="btn btn-outline" onclick="showPackageSelection()">← Back to Selection</button>
+                        <button class="btn btn-success" onclick="proceedToCPEValidation()">Next: Validate CPEs →</button>
+                    </div>
+                </div>
+                
+                <div class="code-block" id="sbomContent">
+                    <!-- Will be populated by JavaScript -->
                 </div>
             </div>
-            
-            <div class="code-block" id="sbomContent">
-                <!-- Will be populated by JavaScript -->
+
+            <!-- CPE Validation Tab -->
+            <div id="cpeValidation" class="tab-content">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2 style="margin: 0;">CPE Validation</h2>
+                    <div>
+                        <button class="btn btn-outline" onclick="showTab('sbomView')">← Back to SBOM</button>
+                        <button class="btn btn-success" onclick="proceedToPURLValidation()">Next: Validate PURLs →</button>
+                    </div>
+                </div>
+                
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-label">Total CPEs</div>
+                        <div class="stat-value" id="totalCPECount">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Valid CPEs</div>
+                        <div class="stat-value" id="validCPECount">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Invalid CPEs</div>
+                        <div class="stat-value" id="invalidCPECount">0</div>
+                    </div>
+                </div>
+
+                <div class="control-buttons">
+                    <button class="btn btn-success" onclick="validateCPEs()">🔍 Validate All CPEs</button>
+                    <button class="btn" onclick="removeInvalidCPEs()">🗑️ Remove Invalid CPEs</button>
+                    <button class="btn" onclick="removeAllCPEs()">🗑️ Remove All CPEs</button>
+                </div>
+
+                <div id="cpeResultsList">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+            </div>
+
+            <!-- PURL Validation Tab -->
+            <div id="purlValidation" class="tab-content">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h2 style="margin: 0;">PURL Validation</h2>
+                    <div>
+                        <button class="btn btn-outline" onclick="showTab('cpeValidation')">← Back to CPE Validation</button>
+                        <button class="btn btn-success" onclick="downloadMergedSBOM()">📥 Download Final SBOM</button>
+                    </div>
+                </div>
+                
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-label">Total PURLs</div>
+                        <div class="stat-value" id="totalPURLCount">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Valid PURLs</div>
+                        <div class="stat-value" id="validPURLCount">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Invalid PURLs</div>
+                        <div class="stat-value" id="invalidPURLCount">0</div>
+                    </div>
+                </div>
+
+                <div class="control-buttons">
+                    <button class="btn btn-success" onclick="validatePURLs()">🔍 Validate All PURLs</button>
+                    <button class="btn" onclick="removeInvalidPURLs()">🗑️ Remove Invalid PURLs</button>
+                    <button class="btn" onclick="removeAllPURLs()">🗑️ Remove All PURLs</button>
+                </div>
+
+                <div id="purlResultsList">
+                    <!-- Will be populated by JavaScript -->
+                </div>
             </div>
         </div>
     </div>

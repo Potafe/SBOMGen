@@ -28,8 +28,8 @@ pydantic_core==2.41.5
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
 python-multipart==0.0.20
-# pywin32==311
-# redis==7.1.0
+# pywin32==311 # commented out to avoid issues on non-Windows systems
+# redis==7.1.0 # might need it later for full fledging the app
 requests==2.32.5
 six==1.17.0
 smmap==5.0.2
@@ -42,9 +42,9 @@ uvicorn==0.38.0
 vine==5.1.0
 wcwidth==0.2.14
 sqlalchemy==2.0.23
-# aiosqlite==0.19.0  # Removed - migrating to PostgreSQL
 psycopg[binary]>=3.1.0  # PostgreSQL async driver for SQLAlchemy
 python-dotenv>=1.0.0
 psycopg-pool>=3.1.0  # Connection pooling for psycopg
 httpx>=0.27.0  # Async HTTP client for GitHub API
 aiohttp==3.13.2
+packageurl-python>=0.15.0
