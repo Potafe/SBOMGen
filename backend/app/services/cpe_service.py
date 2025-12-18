@@ -16,7 +16,7 @@ class CPEService:
     def __init__(self):
         self.base_url = "https://services.nvd.nist.gov/rest/json/cpes/2.0"
         self.headers = {
-            'apiKey': '417d28ac-7e9c-43a6-ad61-7a7e0a7b97a7'
+            'apiKey': '' # ENTER API KEY HERE
         }
         self.request_times = []
         self.max_requests_per_30_seconds = 5  # Without API key: 5 requests per 30 seconds
