@@ -17,6 +17,7 @@ from app.schemas.scan import (
 from app.services.sbom_service import SBOMService
 from app.services.sbom_merge import SBOMMerge
 from app.services.cpe_service import cpe_service
+from app.services.purl_service import purl_service
 from app.core.config import settings
 
 router = APIRouter()
@@ -373,7 +374,7 @@ async def get_uploaded_sbom_results(scan_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve uploaded SBOM results: {str(e)}")
 
-@router.post("/validate-cpes")
+@router.post("/cpe-validate")
 async def validate_cpes(request_body: Dict[str, Any]):
     """
     Validate CPEs for components in a merged SBOM.
@@ -419,4 +420,51 @@ async def get_cpe_stats():
         return {
             "api_available": False,
             "error": "An internal error has occurred."
+        }
+
+@router.post("/purl-validate")
+async def validate_purls(request_body: Dict[str, Any]):
+    """
+    Validate multiple PURLs using purlcli.
+    
+    Args:
+        request_body: JSON body with purls list
+            {
+                "purls": ["pkg:npm/canonical-path@1.0.0", ...]
+            }
+    
+    Returns:
+        Dict mapping PURL to validation status
+    """
+    try:
+        purls = request_body.get("purls", [])
+        if not purls:
+            return {"results": {}}
+        
+        results = await purl_service.verify_purls_batch(purls)
+        return {"results": results}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to validate PURLs: {str(e)}")
+
+@router.get("/purl-stats")
+async def get_purl_stats():
+    """
+    Check purlcli availability and configuration.
+    """
+    try:
+        # Test with a known PURL
+        test_purl = "pkg:npm/canonical-path@1.0.0"
+        is_valid = await purl_service.verify_purl(test_purl)
+        
+        return {
+            "tool_available": True,
+            "test_validation": is_valid,
+            "tool_name": "purlcli"
+        }
+    except Exception as e:
+        logging.exception("Failed to get PURL stats")
+        return {
+            "tool_available": False,
+            "error": str(e)
         }

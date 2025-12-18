@@ -232,6 +232,12 @@ async function generateMergedSBOM() {
         document.getElementById('packageSelection').classList.add('hidden');
         document.getElementById('mergedSBOMDisplay').classList.remove('hidden');
         
+        // Set service links with scanId
+        const cpeLink = document.querySelector('a[href*="cpe-service"]');
+        const purlLink = document.querySelector('a[href*="purl-service"]');
+        if (cpeLink) cpeLink.href = `/static/cpe-service.html?scanId=${scanId}`;
+        if (purlLink) purlLink.href = `/static/purl-service.html?scanId=${scanId}`;
+        
         displayMergedSBOMWithCPEs();
         
     } catch (error) {
@@ -474,4 +480,368 @@ function showError(message) {
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('error').classList.remove('hidden');
     document.getElementById('error').innerHTML = `<p>${message}</p>`;
+}
+
+// ==================== TAB NAVIGATION ====================
+function showTab(tabName) {
+    // Hide all tabs
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Remove active from all buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Show selected tab
+    document.getElementById(tabName).classList.add('active');
+    
+    // Mark button as active
+    const buttons = document.querySelectorAll('.tab-btn');
+    if (tabName === 'sbomView') buttons[0].classList.add('active');
+    else if (tabName === 'cpeValidation') buttons[1].classList.add('active');
+    else if (tabName === 'purlValidation') buttons[2].classList.add('active');
+}
+
+function proceedToCPEValidation() {
+    extractAndDisplayCPEs();
+    showTab('cpeValidation');
+}
+
+function proceedToPURLValidation() {
+    extractAndDisplayPURLs();
+    showTab('purlValidation');
+}
+
+// ==================== CPE VALIDATION ====================
+let cpeValidationResults = {};
+
+function extractAndDisplayCPEs() {
+    const components = cachedMergedSBOM.components || [];
+    const cpes = [];
+    
+    components.forEach(component => {
+        if (component.cpe) {
+            cpes.push(component.cpe);
+        }
+    });
+    
+    document.getElementById('totalCPECount').textContent = cpes.length;
+    
+    const cpeResultsList = document.getElementById('cpeResultsList');
+    cpeResultsList.innerHTML = '';
+    
+    if (cpes.length === 0) {
+        cpeResultsList.innerHTML = '<p>No CPEs found in the merged SBOM.</p>';
+        return;
+    }
+    
+    cpes.forEach((cpe, idx) => {
+        const cpeItem = document.createElement('div');
+        cpeItem.className = 'package-item';
+        cpeItem.id = `cpe-item-${idx}`;
+        
+        // Check if we have cached validation result
+        const isValid = cpeValidationResults[cpe];
+        const statusClass = isValid === true ? 'valid' : isValid === false ? 'invalid' : 'pending';
+        const statusText = isValid === true ? 'Valid' : isValid === false ? 'Invalid' : 'Pending validation';
+        
+        cpeItem.innerHTML = `
+            <div class="package-info">
+                <strong>${cpe}</strong>
+                <span class="status ${statusClass}">${statusText}</span>
+            </div>
+            <button class="btn-small" onclick="removeSingleCPE('${cpe}', ${idx})">Remove</button>
+        `;
+        cpeResultsList.appendChild(cpeItem);
+    });
+    
+    updateCPECounts();
+}
+
+async function validateCPEs() {
+    const components = cachedMergedSBOM.components || [];
+    const cpes = [];
+    
+    components.forEach(component => {
+        if (component.cpe) {
+            cpes.push(component.cpe);
+        }
+    });
+    
+    if (cpes.length === 0) {
+        alert('No CPEs to validate');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/scan/cpe-validate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ cpes: cpes })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to validate CPEs');
+        }
+        
+        const data = await response.json();
+        cpeValidationResults = data.results;
+        
+        // Update display with cached results
+        extractAndDisplayCPEs();
+        
+    } catch (error) {
+        console.error('Failed to validate CPEs:', error);
+        alert(`Error validating CPEs: ${error.message}`);
+    }
+}
+
+function updateCPECounts() {
+    let validCount = 0;
+    let invalidCount = 0;
+    
+    Object.values(cpeValidationResults).forEach(isValid => {
+        if (isValid === true) validCount++;
+        else if (isValid === false) invalidCount++;
+    });
+    
+    document.getElementById('validCPECount').textContent = validCount;
+    document.getElementById('invalidCPECount').textContent = invalidCount;
+}
+
+function removeSingleCPE(cpe, idx) {
+    if (!confirm('Remove this CPE from the component?')) {
+        return;
+    }
+    
+    // Remove from SBOM
+    cachedMergedSBOM.components = cachedMergedSBOM.components.filter(component => component.cpe !== cpe);
+    
+    // Remove from validation results
+    delete cpeValidationResults[cpe];
+    
+    // Update display
+    extractAndDisplayCPEs();
+    alert('CPE removed');
+}
+
+function removeInvalidCPEs() {
+    const invalidCPEs = Object.keys(cpeValidationResults).filter(cpe => cpeValidationResults[cpe] === false);
+    
+    if (invalidCPEs.length === 0) {
+        alert('No invalid CPEs to remove. Please validate first.');
+        return;
+    }
+    
+    if (!confirm(`Remove ${invalidCPEs.length} invalid CPE(s)?`)) {
+        return;
+    }
+    
+    // Remove invalid CPEs from SBOM
+    cachedMergedSBOM.components = cachedMergedSBOM.components.filter(component => {
+        if (!component.cpe) return true;
+        return cpeValidationResults[component.cpe] !== false;
+    });
+    
+    // Remove from validation results
+    invalidCPEs.forEach(cpe => delete cpeValidationResults[cpe]);
+    
+    // Update display
+    extractAndDisplayCPEs();
+    alert(`${invalidCPEs.length} invalid CPE(s) removed`);
+}
+
+function removeAllCPEs() {
+    const totalCPEs = cachedMergedSBOM.components.filter(c => c.cpe).length;
+    
+    if (totalCPEs === 0) {
+        alert('No CPEs to remove');
+        return;
+    }
+    
+    if (!confirm(`Remove all ${totalCPEs} CPE(s) from the SBOM?`)) {
+        return;
+    }
+    
+    // Remove all CPEs from components
+    cachedMergedSBOM.components.forEach(component => {
+        delete component.cpe;
+    });
+    
+    // Clear validation results
+    cpeValidationResults = {};
+    
+    // Update display
+    extractAndDisplayCPEs();
+    alert(`All ${totalCPEs} CPE(s) removed`);
+}
+
+// ==================== PURL VALIDATION ====================
+let purlValidationResults = {};
+
+function extractAndDisplayPURLs() {
+    const components = cachedMergedSBOM.components || [];
+    const purls = [];
+    
+    components.forEach(component => {
+        if (component.purl) {
+            purls.push(component.purl);
+        }
+    });
+    
+    document.getElementById('totalPURLCount').textContent = purls.length;
+    
+    const purlResultsList = document.getElementById('purlResultsList');
+    purlResultsList.innerHTML = '';
+    
+    if (purls.length === 0) {
+        purlResultsList.innerHTML = '<p>No PURLs found in the merged SBOM.</p>';
+        return;
+    }
+    
+    purls.forEach((purl, idx) => {
+        const purlItem = document.createElement('div');
+        purlItem.className = 'package-item';
+        purlItem.id = `purl-item-${idx}`;
+        
+        // Check if we have cached validation result
+        const isValid = purlValidationResults[purl];
+        const statusClass = isValid === true ? 'valid' : isValid === false ? 'invalid' : 'pending';
+        const statusText = isValid === true ? 'Valid' : isValid === false ? 'Invalid' : 'Pending validation';
+        
+        purlItem.innerHTML = `
+            <div class="package-info">
+                <strong>${purl}</strong>
+                <span class="status ${statusClass}">${statusText}</span>
+            </div>
+            <button class="btn-small" onclick="removeSinglePURL('${purl.replace(/'/g, "\\'")}', ${idx})">Remove</button>
+        `;
+        purlResultsList.appendChild(purlItem);
+    });
+    
+    updatePURLCounts();
+}
+
+async function validatePURLs() {
+    const components = cachedMergedSBOM.components || [];
+    const purls = [];
+    
+    components.forEach(component => {
+        if (component.purl) {
+            purls.push(component.purl);
+        }
+    });
+    
+    if (purls.length === 0) {
+        alert('No PURLs to validate');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/scan/purl-validate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ purls: purls })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to validate PURLs');
+        }
+        
+        const data = await response.json();
+        purlValidationResults = data.results;
+        
+        // Update display with cached results
+        extractAndDisplayPURLs();
+        
+    } catch (error) {
+        console.error('Failed to validate PURLs:', error);
+        alert(`Error validating PURLs: ${error.message}`);
+    }
+}
+
+function updatePURLCounts() {
+    let validCount = 0;
+    let invalidCount = 0;
+    
+    Object.values(purlValidationResults).forEach(isValid => {
+        if (isValid === true) validCount++;
+        else if (isValid === false) invalidCount++;
+    });
+    
+    document.getElementById('validPURLCount').textContent = validCount;
+    document.getElementById('invalidPURLCount').textContent = invalidCount;
+}
+
+function removeSinglePURL(purl, idx) {
+    if (!confirm('Remove this PURL from the component?')) {
+        return;
+    }
+    
+    // Remove from SBOM
+    cachedMergedSBOM.components = cachedMergedSBOM.components.filter(component => component.purl !== purl);
+    
+    // Remove from validation results
+    delete purlValidationResults[purl];
+    
+    // Update display
+    extractAndDisplayPURLs();
+    alert('PURL removed');
+}
+
+function removeInvalidPURLs() {
+    const invalidPURLs = Object.keys(purlValidationResults).filter(purl => purlValidationResults[purl] === false);
+    
+    if (invalidPURLs.length === 0) {
+        alert('No invalid PURLs to remove. Please validate first.');
+        return;
+    }
+    
+    if (!confirm(`Remove ${invalidPURLs.length} invalid PURL(s)?`)) {
+        return;
+    }
+    
+    // Remove invalid PURLs from SBOM
+    cachedMergedSBOM.components = cachedMergedSBOM.components.filter(component => {
+        if (!component.purl) return true;
+        return purlValidationResults[component.purl] !== false;
+    });
+    
+    // Remove from validation results
+    invalidPURLs.forEach(purl => delete purlValidationResults[purl]);
+    
+    // Update display
+    extractAndDisplayPURLs();
+    alert(`${invalidPURLs.length} invalid PURL(s) removed`);
+}
+
+function removeAllPURLs() {
+    const totalPURLs = cachedMergedSBOM.components.filter(c => c.purl).length;
+    
+    if (totalPURLs === 0) {
+        alert('No PURLs to remove');
+        return;
+    }
+    
+    if (!confirm(`Remove all ${totalPURLs} PURL(s) from the SBOM?`)) {
+        return;
+    }
+    
+    // Remove all PURLs from components
+    cachedMergedSBOM.components.forEach(component => {
+        delete component.purl;
+    });
+    
+    // Clear validation results
+    purlValidationResults = {};
+    
+    // Update display
+    extractAndDisplayPURLs();
+    alert(`All ${totalPURLs} PURL(s) removed`);
 }
