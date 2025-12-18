@@ -1,4 +1,5 @@
 import os
+import logging
 
 from fastapi import (
     APIRouter, HTTPException, 
@@ -414,7 +415,8 @@ async def get_cpe_stats():
             "rate_limit": f"{cpe_service.max_requests_per_30_seconds} requests per 30 seconds"
         }
     except Exception as e:
+        logging.exception("Failed to get CPE stats")
         return {
             "api_available": False,
-            "error": str(e)
+            "error": "An internal error has occurred."
         }
